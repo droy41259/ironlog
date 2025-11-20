@@ -180,7 +180,7 @@ export default function App() {
     setActiveTab('log');
   };
 
-  if (loading) return <div className="flex h-screen items-center justify-center text-blue-500 font-medium animate-pulse bg-gray-50 dark:bg-zinc-950 dark:text-blue-400">Connecting to Backend...</div>;
+  if (loading) return <div className="flex h-screen items-center justify-center text-blue-500 font-medium animate-pulse bg-gray-50 dark:bg-zinc-950 dark:text-blue-400">Welcome to Dev's invention</div>;
   if (!user) return <div className="flex h-screen items-center justify-center bg-gray-50 dark:bg-zinc-950 dark:text-white">Please sign in.</div>;
 
   return (
