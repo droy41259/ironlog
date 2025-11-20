@@ -25,11 +25,8 @@ import {
 } from 'firebase/firestore';
 
 // --- CONFIGURATION SECTION ---
-
-// TODO: Get your Gemini API Key from https://aistudio.google.com/app/apikey
 const GEMINI_API_KEY = "AIzaSyAZE5siicNIlFLbivoaxkXxbjqifiJGlF8"; 
 
-// TODO: Get this from Firebase Console -> Project Settings -> General -> Your Apps -> SDK Setup
 const firebaseConfig = {
   apiKey: "AIzaSyChWVF80MJkmabCDXAT40mk9jBQGhIT-1g",
   authDomain: "ironlog-ed2d9.firebaseapp.com",
@@ -39,7 +36,6 @@ const firebaseConfig = {
   appId: "1:561822591070:web:e214a21713b85d19dfaccf",
   measurementId: "G-4CX79RQSNQ"
 };
-
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
@@ -127,7 +123,6 @@ export default function App() {
   const [logTemplate, setLogTemplate] = useState(null);
 
   useEffect(() => {
-    // Simplified Auth for Production
     const initAuth = async () => {
       try {
         await signInAnonymously(auth);
@@ -145,7 +140,6 @@ export default function App() {
 
   useEffect(() => {
     if (!user) return;
-    // Production path: users/{userId}/workouts
     const q = query(
       collection(db, 'users', user.uid, 'workouts'),
       orderBy('date', 'desc')
@@ -351,13 +345,13 @@ function Dashboard({ workouts, setActiveTab, onRepeat }) {
 
 function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
   const [workoutName, setWorkoutName] = useState('Evening Lift');
-  const [notes, setNotes] = useState('');
-  const [exercises, setExercises] = useState([{ id: crypto.randomUUID(), name: 'Chest Press', settings: { seat: '', incline: '' }, sets: [{ id: crypto.randomUUID(), kg: '', reps: '', completed: false }] }]);
+  // REMOVED: Global notes state
+  // ADDED: Notes per exercise in exercises state
+  const [exercises, setExercises] = useState([{ id: crypto.randomUUID(), name: 'Chest Press', notes: '', settings: { seat: '', incline: '' }, sets: [{ id: crypto.randomUUID(), kg: '', reps: '', completed: false }] }]);
   
   useEffect(() => {
     if (initialData) {
       setWorkoutName(initialData.name || 'Evening Lift');
-      setNotes(initialData.notes || '');
       if (initialData.exercises && initialData.exercises.length > 0) {
         setExercises(initialData.exercises.map(ex => ({
           ...ex, id: crypto.randomUUID(), sets: ex.sets.map(s => ({ ...s, id: crypto.randomUUID(), completed: false }))
@@ -387,7 +381,7 @@ function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
         1. Look at history. Suggest different muscle or recovery if needed.
         2. Apply progressive overload.
         3. Create workout for request: "${aiPrompt}"
-        Return JSON: { "workoutName": "string", "exercises": [ { "name": "string", "settings": { "seat": "", "incline": "" }, "sets": [ { "kg": number, "reps": number } ] } ] }
+        Return JSON: { "workoutName": "string", "exercises": [ { "name": "string", "notes": "string", "settings": { "seat": "", "incline": "" }, "sets": [ { "kg": number, "reps": number } ] } ] }
       `;
       const result = await callGemini(aiPrompt, systemInstruction);
       if (result && result.exercises) {
@@ -408,7 +402,7 @@ function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
   };
 
   // Exercise helper functions
-  const addExercise = () => setExercises([...exercises, { id: crypto.randomUUID(), name: '', settings: { seat: '', incline: '' }, sets: [{ id: crypto.randomUUID(), kg: '', reps: '', completed: false }] }]);
+  const addExercise = () => setExercises([...exercises, { id: crypto.randomUUID(), name: '', notes: '', settings: { seat: '', incline: '' }, sets: [{ id: crypto.randomUUID(), kg: '', reps: '', completed: false }] }]);
   const removeExercise = (id) => setExercises(exercises.filter(e => e.id !== id));
   const updateExercise = (id, field, value) => setExercises(exercises.map(e => e.id === id ? { ...e, [field]: value } : e));
   const updateSettings = (id, setting, value) => setExercises(exercises.map(e => e.id === id ? { ...e, settings: { ...e.settings, [setting]: value } } : e));
@@ -422,18 +416,18 @@ function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
     try {
       const validExercises = exercises.filter(e => e.name.trim() !== '').map(e => ({
         name: e.name,
+        notes: e.notes || '', // Saving per-exercise notes
         settings: e.settings,
         sets: e.sets.map(s => ({ kg: Number(s.kg), reps: Number(s.reps) }))
       }));
       await addDoc(collection(db, 'users', user.uid, 'workouts'), {
         name: workoutName,
         date: serverTimestamp(),
-        notes: notes,
+        // notes: notes, // Removed global notes
         exercises: validExercises,
         totalVolume: validExercises.reduce((acc, ex) => acc + ex.sets.reduce((sAcc, s) => sAcc + (s.kg * s.reps), 0), 0)
       });
       setWorkoutName('Next Workout');
-      setNotes('');
       setExercises([]);
       if(onSave) onSave(); 
     } catch (err) {
@@ -471,13 +465,7 @@ function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
           <button onClick={() => setShowAIModal(true)} className="bg-gradient-to-br from-violet-500 to-purple-600 text-white p-2 rounded-xl shadow-lg shadow-purple-200 hover:scale-105 transition-transform"><Sparkles className="w-5 h-5" /></button>
         </div>
         <div className="text-sm text-gray-500 flex items-center gap-1"><Calendar className="w-4 h-4" />{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</div>
-        <textarea 
-          value={notes} 
-          onChange={(e) => setNotes(e.target.value)} 
-          placeholder="Workout notes (e.g. Felt strong, Gym crowded...)" 
-          className="w-full text-sm text-gray-600 bg-gray-50 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-100 resize-none transition-all placeholder:text-gray-300" 
-          rows={2} 
-        />
+        {/* REMOVED: Global Note Textarea from here */}
       </div>
 
       <div className="space-y-4">
@@ -486,6 +474,18 @@ function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
             <button onClick={() => removeExercise(exercise.id)} className="absolute top-4 right-4 text-gray-300 hover:text-red-500 transition-colors"><Trash2 className="w-5 h-5" /></button>
             <div className="p-5 pb-2">
               <input placeholder="Exercise Name" value={exercise.name} onChange={(e) => updateExercise(exercise.id, 'name', e.target.value)} className="text-lg font-bold text-gray-900 w-full pr-8 focus:outline-none border-b border-transparent focus:border-blue-200 placeholder-gray-300 transition-all" />
+              
+              {/* ADDED: Note input per exercise */}
+              <div className="mt-2 flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2 border border-transparent focus-within:border-blue-300 focus-within:bg-white transition-all">
+                <MessageSquareQuote className="w-4 h-4 text-gray-400" />
+                <input 
+                  placeholder="Exercise notes (e.g. elbow pain, slow tempo)..." 
+                  value={exercise.notes || ''} 
+                  onChange={(e) => updateExercise(exercise.id, 'notes', e.target.value)} 
+                  className="bg-transparent text-sm w-full focus:outline-none text-gray-600 placeholder-gray-400" 
+                />
+              </div>
+
               <div className="mt-3 flex gap-3">
                 <div className="flex-1 bg-gray-50 rounded-lg px-3 py-2 flex items-center gap-2 border border-transparent focus-within:border-blue-300 focus-within:bg-white transition-all"><Settings2 className="w-4 h-4 text-gray-400" /><input placeholder="Seat Height" value={exercise.settings.seat} onChange={(e) => updateSettings(exercise.id, 'seat', e.target.value)} className="bg-transparent text-sm w-full focus:outline-none text-gray-600" /></div>
                 <div className="flex-1 bg-gray-50 rounded-lg px-3 py-2 flex items-center gap-2 border border-transparent focus-within:border-blue-300 focus-within:bg-white transition-all"><TrendingUp className="w-4 h-4 text-gray-400" /><input placeholder="Incline" value={exercise.settings.incline} onChange={(e) => updateSettings(exercise.id, 'incline', e.target.value)} className="bg-transparent text-sm w-full focus:outline-none text-gray-600" /></div>
@@ -553,17 +553,15 @@ function WorkoutHistory({ user, workouts }) {
             </div>
             {expandedId === workout.id && (
               <div className="bg-gray-50/50 border-t border-gray-100 p-5 animate-in slide-in-from-top-2 duration-200">
-                {workout.notes && (
-                  <div className="mb-5 bg-yellow-50/50 p-3 rounded-lg border border-yellow-100 text-sm text-yellow-800 flex gap-2 items-start">
-                    <MessageSquareQuote className="w-4 h-4 mt-0.5 shrink-0 opacity-50" />
-                    <p className="italic leading-relaxed">{workout.notes}</p>
-                  </div>
-                )}
                 <div className="space-y-6">
                   {workout.exercises?.map((ex, i) => (
                     <div key={i} className="bg-white rounded-lg p-4 border border-gray-100 shadow-sm">
                       <div className="flex justify-between items-start mb-3 border-b border-gray-50 pb-2">
-                        <h5 className="font-bold text-gray-800">{ex.name}</h5>
+                        <div>
+                            <h5 className="font-bold text-gray-800">{ex.name}</h5>
+                            {/* ADDED: Display note in history */}
+                            {ex.notes && <p className="text-xs text-gray-500 italic mt-1">"{ex.notes}"</p>}
+                        </div>
                         <div className="text-xs text-gray-500 flex flex-col items-end gap-0.5">
                            {ex.settings?.seat && <span className="bg-gray-100 px-2 py-0.5 rounded text-gray-600 flex items-center gap-1"><Settings2 className="w-3 h-3" /> Seat: {ex.settings.seat}</span>}
                            {ex.settings?.incline && <span className="bg-gray-100 px-2 py-0.5 rounded text-gray-600 flex items-center gap-1"><TrendingUp className="w-3 h-3" /> Inc: {ex.settings.incline}</span>}
