@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Plus, Trash2, Save, History, Dumbbell, Calendar, Settings2, 
   TrendingUp, CheckCircle2, Circle, Activity, Home, Trophy, 
-  Zap, Sparkles, Loader2, X, ChevronDown, ChevronUp, Repeat, BarChart3, Layers
+  Zap, Sparkles, Loader2, X, ChevronDown, ChevronUp, Repeat, BarChart3, Layers, MessageSquareQuote
 } from 'lucide-react';
 
 // npm install firebase
@@ -27,8 +27,7 @@ import {
 // --- CONFIGURATION SECTION ---
 
 // TODO: Get your Gemini API Key from https://aistudio.google.com/app/apikey
-const GEMINI_API_KEY = "AIzaSyAZE5siicNIlFLbivoaxkXxbjqifiJGlF8";
- 
+const GEMINI_API_KEY = "AIzaSyAZE5siicNIlFLbivoaxkXxbjqifiJGlF8"; 
 
 // TODO: Get this from Firebase Console -> Project Settings -> General -> Your Apps -> SDK Setup
 const firebaseConfig = {
@@ -352,11 +351,13 @@ function Dashboard({ workouts, setActiveTab, onRepeat }) {
 
 function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
   const [workoutName, setWorkoutName] = useState('Evening Lift');
+  const [notes, setNotes] = useState('');
   const [exercises, setExercises] = useState([{ id: crypto.randomUUID(), name: 'Chest Press', settings: { seat: '', incline: '' }, sets: [{ id: crypto.randomUUID(), kg: '', reps: '', completed: false }] }]);
   
   useEffect(() => {
     if (initialData) {
       setWorkoutName(initialData.name || 'Evening Lift');
+      setNotes(initialData.notes || '');
       if (initialData.exercises && initialData.exercises.length > 0) {
         setExercises(initialData.exercises.map(ex => ({
           ...ex, id: crypto.randomUUID(), sets: ex.sets.map(s => ({ ...s, id: crypto.randomUUID(), completed: false }))
@@ -427,17 +428,19 @@ function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
       await addDoc(collection(db, 'users', user.uid, 'workouts'), {
         name: workoutName,
         date: serverTimestamp(),
+        notes: notes,
         exercises: validExercises,
         totalVolume: validExercises.reduce((acc, ex) => acc + ex.sets.reduce((sAcc, s) => sAcc + (s.kg * s.reps), 0), 0)
       });
       setWorkoutName('Next Workout');
+      setNotes('');
       setExercises([]);
       if(onSave) onSave(); 
     } catch (err) {
       console.error("Error saving", err);
       alert("Failed to save. Check Firebase Config.");
     } finally {
-      setIsSaving(false);
+      setIsGenerating(false);
     }
   };
 
@@ -468,6 +471,13 @@ function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
           <button onClick={() => setShowAIModal(true)} className="bg-gradient-to-br from-violet-500 to-purple-600 text-white p-2 rounded-xl shadow-lg shadow-purple-200 hover:scale-105 transition-transform"><Sparkles className="w-5 h-5" /></button>
         </div>
         <div className="text-sm text-gray-500 flex items-center gap-1"><Calendar className="w-4 h-4" />{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</div>
+        <textarea 
+          value={notes} 
+          onChange={(e) => setNotes(e.target.value)} 
+          placeholder="Workout notes (e.g. Felt strong, Gym crowded...)" 
+          className="w-full text-sm text-gray-600 bg-gray-50 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-100 resize-none transition-all placeholder:text-gray-300" 
+          rows={2} 
+        />
       </div>
 
       <div className="space-y-4">
@@ -543,6 +553,12 @@ function WorkoutHistory({ user, workouts }) {
             </div>
             {expandedId === workout.id && (
               <div className="bg-gray-50/50 border-t border-gray-100 p-5 animate-in slide-in-from-top-2 duration-200">
+                {workout.notes && (
+                  <div className="mb-5 bg-yellow-50/50 p-3 rounded-lg border border-yellow-100 text-sm text-yellow-800 flex gap-2 items-start">
+                    <MessageSquareQuote className="w-4 h-4 mt-0.5 shrink-0 opacity-50" />
+                    <p className="italic leading-relaxed">{workout.notes}</p>
+                  </div>
+                )}
                 <div className="space-y-6">
                   {workout.exercises?.map((ex, i) => (
                     <div key={i} className="bg-white rounded-lg p-4 border border-gray-100 shadow-sm">
