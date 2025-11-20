@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Plus, Trash2, Save, History, Dumbbell, Calendar, Settings2, 
   TrendingUp, CheckCircle2, Circle, Activity, Home, Trophy, 
-  Zap, Sparkles, Loader2, X, ChevronDown, ChevronUp
+  Zap, Sparkles, Loader2, X, ChevronDown, ChevronUp, Repeat, BarChart3, Layers
 } from 'lucide-react';
 
 // npm install firebase
@@ -27,7 +27,8 @@ import {
 // --- CONFIGURATION SECTION ---
 
 // TODO: Get your Gemini API Key from https://aistudio.google.com/app/apikey
-const GEMINI_API_KEY = "AIzaSyAZE5siicNIlFLbivoaxkXxbjqifiJGlF8"; 
+const GEMINI_API_KEY = "AIzaSyAZE5siicNIlFLbivoaxkXxbjqifiJGlF8";
+ 
 
 // TODO: Get this from Firebase Console -> Project Settings -> General -> Your Apps -> SDK Setup
 const firebaseConfig = {
@@ -39,6 +40,7 @@ const firebaseConfig = {
   appId: "1:561822591070:web:e214a21713b85d19dfaccf",
   measurementId: "G-4CX79RQSNQ"
 };
+
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
@@ -123,6 +125,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [workouts, setWorkouts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [logTemplate, setLogTemplate] = useState(null);
 
   useEffect(() => {
     // Simplified Auth for Production
@@ -164,6 +167,11 @@ export default function App() {
     return () => unsubscribe();
   }, [user]);
 
+  const handleRepeat = (workout) => {
+    setLogTemplate(workout);
+    setActiveTab('log');
+  };
+
   if (loading) return <div className="flex h-screen items-center justify-center text-blue-500 font-medium animate-pulse">Loading IronLog...</div>;
   if (!user) return <div className="flex h-screen items-center justify-center">Please sign in.</div>;
 
@@ -179,8 +187,8 @@ export default function App() {
       </nav>
 
       <main className="max-w-md mx-auto p-4">
-        {activeTab === 'home' && <Dashboard workouts={workouts} setActiveTab={setActiveTab} />}
-        {activeTab === 'log' && <WorkoutLogger user={user} workouts={workouts} onSave={() => setActiveTab('home')} />}
+        {activeTab === 'home' && <Dashboard workouts={workouts} setActiveTab={setActiveTab} onRepeat={handleRepeat} />}
+        {activeTab === 'log' && <WorkoutLogger user={user} workouts={workouts} initialData={logTemplate} onSave={() => { setLogTemplate(null); setActiveTab('home'); }} />}
         {activeTab === 'history' && <WorkoutHistory user={user} workouts={workouts} />}
       </main>
 
@@ -190,7 +198,7 @@ export default function App() {
           <span className="text-[10px] font-bold">Home</span>
         </button>
         <div className="relative -top-5">
-          <button onClick={() => setActiveTab('log')} className={`flex flex-col items-center justify-center w-14 h-14 rounded-full shadow-lg border-4 border-gray-50 transition-all ${activeTab === 'log' ? 'bg-blue-600 text-white scale-110' : 'bg-blue-600 text-white hover:scale-105'}`}>
+          <button onClick={() => { setLogTemplate(null); setActiveTab('log'); }} className={`flex flex-col items-center justify-center w-14 h-14 rounded-full shadow-lg border-4 border-gray-50 transition-all ${activeTab === 'log' ? 'bg-blue-600 text-white scale-110' : 'bg-blue-600 text-white hover:scale-105'}`}>
             <Plus className="w-7 h-7" />
           </button>
         </div>
@@ -205,9 +213,10 @@ export default function App() {
 
 // --- Sub-Components ---
 
-function Dashboard({ workouts, setActiveTab }) {
+function Dashboard({ workouts, setActiveTab, onRepeat }) {
   const [coachTip, setCoachTip] = useState(null);
   const [loadingTip, setLoadingTip] = useState(false);
+  const [chartMetric, setChartMetric] = useState('volume');
 
   const personalRecords = useMemo(() => {
     const records = {};
@@ -240,8 +249,21 @@ function Dashboard({ workouts, setActiveTab }) {
     return Object.entries(records).map(([name, data]) => ({ name, ...data })).sort((a, b) => b.kg - a.kg);
   }, [workouts]);
 
-  const volumeData = useMemo(() => {
-    return workouts.slice().sort((a, b) => a.date - b.date).map(w => ({ val: w.totalVolume || 0 })).slice(-7);
+  const chartData = useMemo(() => {
+    return workouts.slice().sort((a, b) => a.date - b.date).map(w => {
+      if (chartMetric === 'volume') return { val: w.totalVolume || 0 };
+      const totalSets = w.exercises?.reduce((acc, ex) => acc + (ex.sets?.length || 0), 0) || 0;
+      return { val: totalSets };
+    }).slice(-7);
+  }, [workouts, chartMetric]);
+
+  const weeklyProgress = useMemo(() => {
+    const now = new Date();
+    const day = now.getDay();
+    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+    const startOfWeek = new Date(now.setDate(diff));
+    startOfWeek.setHours(0,0,0,0);
+    return workouts.filter(w => w.date >= startOfWeek).length;
   }, [workouts]);
 
   const totalWorkouts = workouts.length;
@@ -269,9 +291,9 @@ function Dashboard({ workouts, setActiveTab }) {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-gray-500 text-sm">{totalWorkouts > 0 ? `You've crushed ${totalWorkouts} workouts.` : "Ready to start?"}</p>
+      <div className="flex items-center justify-between">
+        <div><h1 className="text-2xl font-bold text-gray-900">Dashboard</h1><p className="text-gray-500 text-sm">{totalWorkouts > 0 ? "Keep up the momentum!" : "Ready to start?"}</p></div>
+        <div className="bg-blue-50 text-blue-700 px-3 py-2 rounded-xl flex items-center gap-2 shadow-sm border border-blue-100"><div className="relative"><Circle className="w-8 h-8 text-blue-200" strokeWidth={4} /><div className="absolute inset-0 flex items-center justify-center text-[10px] font-bold">{weeklyProgress}</div></div><div className="flex flex-col leading-none"><span className="text-[10px] text-blue-400 font-bold uppercase">This Week</span><span className="text-xs font-bold">Sessions</span></div></div>
       </div>
 
       <div className="bg-gradient-to-r from-violet-500 to-purple-600 rounded-2xl p-5 text-white shadow-lg shadow-purple-200 relative overflow-hidden">
@@ -293,11 +315,17 @@ function Dashboard({ workouts, setActiveTab }) {
 
       <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
         <div className="flex justify-between items-start mb-4">
-          <div><h2 className="font-bold text-gray-800 flex items-center gap-2"><Activity className="w-5 h-5 text-blue-500" /> Volume Trend</h2></div>
-          {latestWorkout && <div className="text-right"><div className="text-2xl font-bold text-gray-900">{latestWorkout.totalVolume?.toLocaleString()}</div><div className="text-xs text-gray-400">Last Session (kg)</div></div>}
+          <div><h2 className="font-bold text-gray-800 flex items-center gap-2"><Activity className="w-5 h-5 text-blue-500" /> {chartMetric === 'volume' ? 'Volume Load' : 'Training Frequency'}</h2><p className="text-gray-400 text-xs">{chartMetric === 'volume' ? 'Total kg' : 'Total sets'} (Last 7)</p></div>
+          <div className="flex bg-gray-100 p-1 rounded-lg"><button onClick={() => setChartMetric('volume')} className={`p-1.5 rounded-md transition-all ${chartMetric === 'volume' ? 'bg-white shadow text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}><BarChart3 className="w-4 h-4" /></button><button onClick={() => setChartMetric('sets')} className={`p-1.5 rounded-md transition-all ${chartMetric === 'sets' ? 'bg-white shadow text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}><Layers className="w-4 h-4" /></button></div>
         </div>
-        <div className="h-32 w-full"><MiniChart data={volumeData} height={80} /></div>
+        <div className="h-32 w-full"><MiniChart data={chartData} height={80} color={chartMetric === 'volume' ? '#3b82f6' : '#8b5cf6'} /></div>
       </div>
+
+      {latestWorkout && (
+        <div className="grid grid-cols-1 gap-3">
+           <button onClick={() => onRepeat(latestWorkout)} className="bg-white border border-gray-100 shadow-sm p-4 rounded-xl flex items-center justify-between hover:bg-gray-50 transition-colors group"><div className="flex items-center gap-3"><div className="bg-green-100 p-2 rounded-lg text-green-600 group-hover:bg-green-200 transition-colors"><Repeat className="w-5 h-5" /></div><div className="text-left"><div className="font-bold text-gray-900 text-sm">Repeat Last Workout</div><div className="text-xs text-gray-500">Do "{latestWorkout.name}" again</div></div></div><ChevronDown className="w-4 h-4 text-gray-300 -rotate-90" /></button>
+        </div>
+      )}
 
       {totalWorkouts === 0 && (
         <button onClick={() => setActiveTab('log')} className="w-full py-4 bg-white border-2 border-dashed border-blue-200 rounded-xl flex flex-col items-center justify-center gap-2 text-blue-500 hover:bg-blue-50 transition-colors"><Plus className="w-8 h-8" /><span className="font-medium">Log your first workout</span></button>
@@ -307,7 +335,7 @@ function Dashboard({ workouts, setActiveTab }) {
         <div className="flex items-center justify-between mb-3"><h3 className="font-bold text-gray-800 flex items-center gap-2"><Trophy className="w-5 h-5 text-yellow-500" /> Personal Records</h3><span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">{personalRecords.length} Exercises</span></div>
         <div className="grid grid-cols-2 gap-3">
           {personalRecords.length === 0 ? <div className="col-span-2 text-center py-8 text-gray-400 bg-white rounded-xl border border-gray-100">No max weights yet.</div> : personalRecords.map((record, idx) => (
-            <div key={idx} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col justify-between">
+            <div key={idx} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col justify-between hover:shadow-md transition-all cursor-pointer">
               <div>
                 <div className="text-xs text-gray-400 font-medium uppercase tracking-wider truncate mb-1">{record.name}</div>
                 <div className="text-xl font-bold text-gray-900">{record.kg} <span className="text-xs font-normal text-gray-400">kg</span></div>
@@ -322,9 +350,21 @@ function Dashboard({ workouts, setActiveTab }) {
   );
 }
 
-function WorkoutLogger({ user, workouts = [], onSave }) {
+function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
   const [workoutName, setWorkoutName] = useState('Evening Lift');
   const [exercises, setExercises] = useState([{ id: crypto.randomUUID(), name: 'Chest Press', settings: { seat: '', incline: '' }, sets: [{ id: crypto.randomUUID(), kg: '', reps: '', completed: false }] }]);
+  
+  useEffect(() => {
+    if (initialData) {
+      setWorkoutName(initialData.name || 'Evening Lift');
+      if (initialData.exercises && initialData.exercises.length > 0) {
+        setExercises(initialData.exercises.map(ex => ({
+          ...ex, id: crypto.randomUUID(), sets: ex.sets.map(s => ({ ...s, id: crypto.randomUUID(), completed: false }))
+        })));
+      }
+    }
+  }, [initialData]);
+
   const [isSaving, setIsSaving] = useState(false);
   const [showAIModal, setShowAIModal] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
