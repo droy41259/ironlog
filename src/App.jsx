@@ -29,7 +29,7 @@ import {
 } from 'firebase/firestore';
 
 // --- CONFIGURATION SECTION ---
-const GEMINI_API_KEY = "AIzaSyAZE5siicNIlFLbivoaxkXxbjqifiJGlF8"; 
+const apiKey = ""; 
 
 // System-provided global variables (fallback for local testing)
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'ironlog-default';
@@ -51,12 +51,7 @@ const db = getFirestore(app);
 // --- Helper Functions ---
 
 async function callGemini(prompt, systemInstruction = "You are a helpful assistant.") {
-  if (!GEMINI_API_KEY || GEMINI_API_KEY.includes("YOUR_GEMINI")) {
-    console.warn("Gemini API Key not set");
-    return null;
-  }
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${GEMINI_API_KEY}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
   
   const payload = {
     contents: [{ parts: [{ text: prompt }] }],
