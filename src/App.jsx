@@ -3,7 +3,7 @@ import {
   Plus, Trash2, Save, History, Dumbbell, Calendar, Settings2, 
   TrendingUp, CheckCircle2, Circle, Activity, Home, Trophy, 
   Zap, Sparkles, Loader2, X, ChevronDown, ChevronUp, Repeat, 
-  BarChart3, Layers, MessageSquareQuote, Moon, Sun, LogOut, Mail, Lock, User, AlertCircle, Download
+  BarChart3, Layers, MessageSquareQuote, Moon, Sun, LogOut, Mail, Lock, User, AlertCircle, Download, Link, Unlink
 } from 'lucide-react';
 
 // npm install firebase
@@ -89,6 +89,36 @@ async function callGemini(prompt, systemInstruction = "You are a helpful assista
     }
   }
 }
+
+// Helper to group exercises into supersets for rendering
+const groupExercises = (exercises) => {
+  if (!exercises) return [];
+  const groups = [];
+  let currentGroup = [];
+
+  exercises.forEach((ex, index) => {
+    const isSuperset = ex.supersetId;
+    const prevEx = exercises[index - 1];
+
+    if (index === 0) {
+      currentGroup.push(ex);
+    } else {
+      // If current has supersetId AND it matches previous supersetId, group them
+      if (isSuperset && prevEx && prevEx.supersetId === isSuperset) {
+        currentGroup.push(ex);
+      } else {
+        // Push old group to groups
+        groups.push(currentGroup);
+        // Start new group
+        currentGroup = [ex];
+      }
+    }
+  });
+  // Push the last group
+  if (currentGroup.length > 0) groups.push(currentGroup);
+  return groups;
+};
+
 
 // --- Chart Component ---
 const MiniChart = ({ data, color = "#3b82f6", height = 60 }) => {
@@ -182,6 +212,8 @@ export default function App() {
       exercises: workout.exercises.map(ex => ({
         ...ex,
         id: crypto.randomUUID(),
+        // Preserve supersetId if it exists, but randomize it if needed to avoid conflicts if we import multiple times (simplified for now: keep same ID structure)
+        supersetId: ex.supersetId || null,
         sets: ex.sets.map(s => ({ ...s, id: crypto.randomUUID(), completed: false }))
       }))
     };
@@ -542,10 +574,6 @@ function Dashboard({ workouts, setActiveTab, onRepeat, user }) {
 }
 
 function WorkoutLogger({ user, workouts = [], onSave }) {
-  // UPDATED: Lazy Initialization of State to fix Race Condition
-  // This ensures we read the localStorage IMMEDIATELY when the component mounts,
-  // capturing the "Repeat" data before any useEffects run.
-  
   const [workoutName, setWorkoutName] = useState(() => {
     try {
       const saved = localStorage.getItem(`ironlog_draft_${user.uid}`);
@@ -560,7 +588,6 @@ function WorkoutLogger({ user, workouts = [], onSave }) {
     } catch { return [{ id: crypto.randomUUID(), name: 'Chest Press', notes: '', settings: { seat: '', incline: '' }, sets: [{ id: crypto.randomUUID(), kg: '', reps: '', completed: false }] }]; }
   });
 
-  // UPDATED: DRAFT LOGIC - Save draft on every change
   useEffect(() => {
     const draftData = { name: workoutName, exercises };
     localStorage.setItem(`ironlog_draft_${user.uid}`, JSON.stringify(draftData));
@@ -590,7 +617,6 @@ function WorkoutLogger({ user, workouts = [], onSave }) {
         Return JSON: { "workoutName": "string", "exercises": [ { "name": "string", "notes": "string", "settings": { "seat": "", "incline": "" }, "sets": [ { "kg": number, "reps": number } ] } ] }
       `;
       
-      // CALLS BACKEND API NOW
       const result = await callGemini(aiPrompt, systemInstruction);
       
       if (result && result.exercises) {
@@ -612,6 +638,31 @@ function WorkoutLogger({ user, workouts = [], onSave }) {
 
   // Exercise helper functions
   const addExercise = () => setExercises([...exercises, { id: crypto.randomUUID(), name: '', notes: '', settings: { seat: '', incline: '' }, sets: [{ id: crypto.randomUUID(), kg: '', reps: '', completed: false }] }]);
+  
+  // SUPERSET LOGIC: Adds a new exercise right after the current one, sharing a Superset ID
+  const addSupersetExercise = (baseExerciseId, existingSupersetId) => {
+    const newId = crypto.randomUUID();
+    const supersetId = existingSupersetId || crypto.randomUUID();
+    const newExercise = { 
+      id: newId, 
+      supersetId: supersetId,
+      name: '', 
+      notes: '', 
+      settings: { seat: '', incline: '' }, 
+      sets: [{ id: crypto.randomUUID(), kg: '', reps: '', completed: false }] 
+    };
+
+    // If the base exercise didn't have a superset ID yet, we need to update it too
+    const updatedExercises = exercises.reduce((acc, ex) => {
+      if (ex.id === baseExerciseId) {
+         return [...acc, { ...ex, supersetId }, newExercise];
+      }
+      return [...acc, ex];
+    }, []);
+
+    setExercises(updatedExercises);
+  };
+
   const removeExercise = (id) => setExercises(exercises.filter(e => e.id !== id));
   const updateExercise = (id, field, value) => setExercises(exercises.map(e => e.id === id ? { ...e, [field]: value } : e));
   const updateSettings = (id, setting, value) => setExercises(exercises.map(e => e.id === id ? { ...e, settings: { ...e.settings, [setting]: value } } : e));
@@ -627,9 +678,10 @@ function WorkoutLogger({ user, workouts = [], onSave }) {
         name: e.name,
         notes: e.notes || '', 
         settings: e.settings,
+        supersetId: e.supersetId || null, // Save superset ID
         sets: e.sets.map(s => ({ kg: Number(s.kg), reps: Number(s.reps) }))
       }));
-      // Use the stable appId here too
+      
       await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'workouts'), {
         name: workoutName,
         date: serverTimestamp(),
@@ -637,7 +689,6 @@ function WorkoutLogger({ user, workouts = [], onSave }) {
         totalVolume: validExercises.reduce((acc, ex) => acc + ex.sets.reduce((sAcc, s) => sAcc + (s.kg * s.reps), 0), 0)
       });
       
-      // Clear draft on success
       localStorage.removeItem(`ironlog_draft_${user.uid}`);
       
       setWorkoutName('Next Workout');
@@ -651,8 +702,12 @@ function WorkoutLogger({ user, workouts = [], onSave }) {
     }
   };
 
+  // Group exercises for rendering
+  const exerciseGroups = groupExercises(exercises);
+
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 relative">
+      {/* AI Modal (Same as before) */}
       {showAIModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-zinc-900 rounded-2xl w-full max-w-sm shadow-xl overflow-hidden animate-in zoom-in-95 duration-200 border border-gray-100 dark:border-zinc-800">
@@ -681,52 +736,82 @@ function WorkoutLogger({ user, workouts = [], onSave }) {
       </div>
 
       <div className="space-y-4">
-        {exercises.map((exercise, i) => (
-          <div key={exercise.id} className="bg-white dark:bg-zinc-900 rounded-2xl shadow-sm border border-gray-100 dark:border-zinc-800 overflow-hidden relative animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <button onClick={() => removeExercise(exercise.id)} className="absolute top-4 right-4 text-gray-300 dark:text-zinc-600 hover:text-red-500 transition-colors"><Trash2 className="w-5 h-5" /></button>
-            <div className="p-5 pb-2">
-              <input placeholder="Exercise Name" value={exercise.name} onChange={(e) => updateExercise(exercise.id, 'name', e.target.value)} className="text-lg font-bold text-gray-900 dark:text-white bg-transparent w-full pr-8 focus:outline-none border-b border-transparent focus:border-blue-200 placeholder-gray-300 dark:placeholder-zinc-600 transition-all" />
-              
-              {/* Note input per exercise */}
-              <div className="mt-2 flex items-center gap-2 bg-gray-50 dark:bg-zinc-800 rounded-lg px-3 py-2 border border-transparent focus-within:border-blue-300 focus-within:bg-transparent transition-all">
-                <MessageSquareQuote className="w-4 h-4 text-gray-400 dark:text-zinc-500" />
-                <input 
-                  placeholder="Exercise notes (e.g. elbow pain, slow tempo)..." 
-                  value={exercise.notes || ''} 
-                  onChange={(e) => updateExercise(exercise.id, 'notes', e.target.value)} 
-                  className="bg-transparent text-sm w-full focus:outline-none text-gray-600 dark:text-zinc-300 placeholder-gray-400 dark:placeholder-zinc-600" 
-                />
-              </div>
+        {exerciseGroups.map((group, groupIndex) => {
+          const isSuperset = group.length > 1;
+          return (
+            <div key={groupIndex} className={`relative animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-2xl ${isSuperset ? 'border-l-4 border-orange-500 bg-orange-50/30 dark:bg-orange-900/10 pl-2' : ''}`}>
+               {isSuperset && (
+                 <div className="absolute -left-4 top-4 bg-orange-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-r-md shadow-sm flex items-center gap-1 z-10">
+                   <Link className="w-3 h-3" /> Superset
+                 </div>
+               )}
+               
+               <div className={`space-y-4 ${isSuperset ? 'py-2' : ''}`}>
+                 {group.map((exercise, indexInGroup) => (
+                    <div key={exercise.id} className="bg-white dark:bg-zinc-900 rounded-2xl shadow-sm border border-gray-100 dark:border-zinc-800 overflow-hidden relative">
+                      <div className="absolute top-4 right-4 flex gap-2">
+                         {/* Link/Unlink Button */}
+                         {(!isSuperset && indexInGroup === 0) && (
+                           <button onClick={() => addSupersetExercise(exercise.id, exercise.supersetId)} className="text-gray-300 dark:text-zinc-600 hover:text-orange-500 transition-colors p-1 rounded hover:bg-orange-50 dark:hover:bg-orange-900/30" title="Create Superset">
+                             <Link className="w-5 h-5" />
+                           </button>
+                         )}
+                         <button onClick={() => removeExercise(exercise.id)} className="text-gray-300 dark:text-zinc-600 hover:text-red-500 transition-colors p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30">
+                           <Trash2 className="w-5 h-5" />
+                         </button>
+                      </div>
+                      
+                      <div className="p-5 pb-2">
+                        <input placeholder="Exercise Name" value={exercise.name} onChange={(e) => updateExercise(exercise.id, 'name', e.target.value)} className="text-lg font-bold text-gray-900 dark:text-white bg-transparent w-full pr-20 focus:outline-none border-b border-transparent focus:border-blue-200 placeholder-gray-300 dark:placeholder-zinc-600 transition-all" />
+                        
+                        <div className="mt-2 flex items-center gap-2 bg-gray-50 dark:bg-zinc-800 rounded-lg px-3 py-2 border border-transparent focus-within:border-blue-300 focus-within:bg-transparent transition-all">
+                          <MessageSquareQuote className="w-4 h-4 text-gray-400 dark:text-zinc-500" />
+                          <input 
+                            placeholder="Exercise notes..." 
+                            value={exercise.notes || ''} 
+                            onChange={(e) => updateExercise(exercise.id, 'notes', e.target.value)} 
+                            className="bg-transparent text-sm w-full focus:outline-none text-gray-600 dark:text-zinc-300 placeholder-gray-400 dark:placeholder-zinc-600" 
+                          />
+                        </div>
 
-              <div className="mt-3 flex gap-3">
-                <div className="flex-1 bg-gray-50 dark:bg-zinc-800 rounded-lg px-3 py-2 flex items-center gap-2 border border-transparent focus-within:border-blue-300 focus-within:bg-transparent transition-all"><Settings2 className="w-4 h-4 text-gray-400 dark:text-zinc-500" /><input placeholder="Seat Height" value={exercise.settings.seat} onChange={(e) => updateSettings(exercise.id, 'seat', e.target.value)} className="bg-transparent text-sm w-full focus:outline-none text-gray-600 dark:text-zinc-300" /></div>
-                <div className="flex-1 bg-gray-50 dark:bg-zinc-800 rounded-lg px-3 py-2 flex items-center gap-2 border border-transparent focus-within:border-blue-300 focus-within:bg-transparent transition-all"><TrendingUp className="w-4 h-4 text-gray-400 dark:text-zinc-500" /><input placeholder="Incline" value={exercise.settings.incline} onChange={(e) => updateSettings(exercise.id, 'incline', e.target.value)} className="bg-transparent text-sm w-full focus:outline-none text-gray-600 dark:text-zinc-300" /></div>
-              </div>
+                        <div className="mt-3 flex gap-3">
+                          <div className="flex-1 bg-gray-50 dark:bg-zinc-800 rounded-lg px-3 py-2 flex items-center gap-2 border border-transparent focus-within:border-blue-300 focus-within:bg-transparent transition-all"><Settings2 className="w-4 h-4 text-gray-400 dark:text-zinc-500" /><input placeholder="Seat Height" value={exercise.settings.seat} onChange={(e) => updateSettings(exercise.id, 'seat', e.target.value)} className="bg-transparent text-sm w-full focus:outline-none text-gray-600 dark:text-zinc-300" /></div>
+                          <div className="flex-1 bg-gray-50 dark:bg-zinc-800 rounded-lg px-3 py-2 flex items-center gap-2 border border-transparent focus-within:border-blue-300 focus-within:bg-transparent transition-all"><TrendingUp className="w-4 h-4 text-gray-400 dark:text-zinc-500" /><input placeholder="Incline" value={exercise.settings.incline} onChange={(e) => updateSettings(exercise.id, 'incline', e.target.value)} className="bg-transparent text-sm w-full focus:outline-none text-gray-600 dark:text-zinc-300" /></div>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-10 gap-2 px-4 py-2 bg-gray-50/50 dark:bg-zinc-800/50 text-xs font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-wider text-center border-y border-gray-100 dark:border-zinc-800">
+                        <div className="col-span-1">#</div><div className="col-span-3">kg</div><div className="col-span-3">Reps</div><div className="col-span-3">Done</div>
+                      </div>
+                      <div className="px-4 py-2 space-y-2">
+                        {exercise.sets.map((set, index) => (
+                          <div key={set.id} className={`grid grid-cols-10 gap-2 items-center group ${set.completed ? 'opacity-50' : 'opacity-100'} transition-opacity`}>
+                            <div className="col-span-1 text-center font-medium text-gray-400 dark:text-zinc-600 text-sm">{index + 1}</div>
+                            <div className="col-span-3"><input type="number" placeholder="-" value={set.kg} onChange={(e) => updateSet(exercise.id, set.id, 'kg', e.target.value)} disabled={set.completed} className="w-full text-center bg-gray-50 dark:bg-zinc-800 rounded-lg py-2 font-bold text-gray-700 dark:text-zinc-200 focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-zinc-700 outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed" /></div>
+                            <div className="col-span-3"><input type="number" placeholder="-" value={set.reps} onChange={(e) => updateSet(exercise.id, set.id, 'reps', e.target.value)} disabled={set.completed} className="w-full text-center bg-gray-50 dark:bg-zinc-800 rounded-lg py-2 font-bold text-gray-700 dark:text-zinc-200 focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-zinc-700 outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed" /></div>
+                            <div className="col-span-3 flex justify-center gap-2">
+                              <button onClick={() => updateSet(exercise.id, set.id, 'completed', !set.completed)} className={`p-2 rounded-full transition-all ${set.completed ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' : 'bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-500 hover:bg-gray-200 dark:hover:bg-zinc-700'}`}>{set.completed ? <CheckCircle2 className="w-5 h-5" /> : <Circle className="w-5 h-5" />}</button>
+                              {exercise.sets.length > 1 && <button onClick={() => removeSet(exercise.id, set.id)} className="text-gray-300 dark:text-zinc-600 hover:text-red-400"><Trash2 className="w-4 h-4" /></button>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <button onClick={() => addSet(exercise.id)} className="w-full py-3 bg-gray-50 dark:bg-zinc-800/50 hover:bg-gray-100 dark:hover:bg-zinc-800 text-blue-600 dark:text-blue-400 font-medium text-sm flex items-center justify-center gap-2 transition-colors border-t border-gray-100 dark:border-zinc-800"><Plus className="w-4 h-4" /> Add Set</button>
+                    </div>
+                 ))}
+                 
+                 {isSuperset && (
+                   <button onClick={() => addSupersetExercise(group[group.length-1].id, group[group.length-1].supersetId)} className="w-full py-3 rounded-xl border-2 border-dashed border-orange-200 dark:border-orange-900/50 text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/20 flex items-center justify-center gap-2 font-medium transition-colors">
+                     <Plus className="w-4 h-4" /> Add to Superset
+                   </button>
+                 )}
+               </div>
             </div>
-            <div className="grid grid-cols-10 gap-2 px-4 py-2 bg-gray-50/50 dark:bg-zinc-800/50 text-xs font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-wider text-center border-y border-gray-100 dark:border-zinc-800">
-              <div className="col-span-1">#</div><div className="col-span-3">kg</div><div className="col-span-3">Reps</div><div className="col-span-3">Done</div>
-            </div>
-            <div className="px-4 py-2 space-y-2">
-              {exercise.sets.map((set, index) => (
-                <div key={set.id} className={`grid grid-cols-10 gap-2 items-center group ${set.completed ? 'opacity-50' : 'opacity-100'} transition-opacity`}>
-                  <div className="col-span-1 text-center font-medium text-gray-400 dark:text-zinc-600 text-sm">{index + 1}</div>
-                  <div className="col-span-3"><input type="number" placeholder="-" value={set.kg} onChange={(e) => updateSet(exercise.id, set.id, 'kg', e.target.value)} disabled={set.completed} className="w-full text-center bg-gray-50 dark:bg-zinc-800 rounded-lg py-2 font-bold text-gray-700 dark:text-zinc-200 focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-zinc-700 outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed" /></div>
-                  <div className="col-span-3"><input type="number" placeholder="-" value={set.reps} onChange={(e) => updateSet(exercise.id, set.id, 'reps', e.target.value)} disabled={set.completed} className="w-full text-center bg-gray-50 dark:bg-zinc-800 rounded-lg py-2 font-bold text-gray-700 dark:text-zinc-200 focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-zinc-700 outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed" /></div>
-                  <div className="col-span-3 flex justify-center gap-2">
-                    <button onClick={() => updateSet(exercise.id, set.id, 'completed', !set.completed)} className={`p-2 rounded-full transition-all ${set.completed ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' : 'bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-500 hover:bg-gray-200 dark:hover:bg-zinc-700'}`}>{set.completed ? <CheckCircle2 className="w-5 h-5" /> : <Circle className="w-5 h-5" />}</button>
-                    {exercise.sets.length > 1 && <button onClick={() => removeSet(exercise.id, set.id)} className="text-gray-300 dark:text-zinc-600 hover:text-red-400"><Trash2 className="w-4 h-4" /></button>}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <button onClick={() => addSet(exercise.id)} className="w-full py-3 bg-gray-50 dark:bg-zinc-800/50 hover:bg-gray-100 dark:hover:bg-zinc-800 text-blue-600 dark:text-blue-400 font-medium text-sm flex items-center justify-center gap-2 transition-colors border-t border-gray-100 dark:border-zinc-800"><Plus className="w-4 h-4" /> Add Set</button>
-          </div>
-        ))}
+          );
+        })}
       </div>
+
       <div className="flex flex-col gap-3 pt-4">
         <button onClick={addExercise} className="w-full py-4 rounded-xl bg-blue-600 text-white font-bold text-lg shadow-lg shadow-blue-200 dark:shadow-none hover:bg-blue-700 hover:shadow-xl hover:scale-[1.01] transition-all active:scale-95 flex items-center justify-center gap-2"><Plus className="w-5 h-5" /> Add Exercise</button>
-        
-        {/* UPDATED: FINISH BUTTON COLOR IS NOW SOLID RED */}
         <button onClick={finishWorkout} disabled={isSaving} className="w-full py-4 rounded-xl bg-red-600 text-white font-bold text-lg shadow-lg shadow-red-200 dark:shadow-none hover:bg-red-700 hover:shadow-xl hover:scale-[1.01] transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-70">{isSaving ? 'Saving...' : <><Save className="w-5 h-5" /> Finish Workout</>}</button>
       </div>
     </div>
@@ -749,10 +834,9 @@ function WorkoutHistory({ user, workouts, onRepeat }) {
   const handleExport = () => {
     if (workouts.length === 0) return;
     try {
-      // Create a clean version of the data for export
       const exportData = workouts.map(w => ({
         ...w,
-        date: w.date.toISOString(), // Ensure date is stringified standardly
+        date: w.date.toISOString(), 
         exercises: w.exercises.map(e => ({
           ...e,
           sets: e.sets.map(s => ({ kg: Number(s.kg), reps: Number(s.reps), completed: s.completed }))
@@ -782,7 +866,6 @@ function WorkoutHistory({ user, workouts, onRepeat }) {
     }
     setIsSummarizing(true);
     try {
-      // Prepare lightweight data for AI to save tokens
       const historyContext = workouts.slice(0, 20).map(w => ({
         date: w.date.toLocaleDateString(),
         title: w.name,
@@ -864,13 +947,16 @@ function WorkoutHistory({ user, workouts, onRepeat }) {
       {workouts.length === 0 ? (
         <div className="text-center py-10 text-gray-400 dark:text-zinc-600 bg-white dark:bg-zinc-900 rounded-xl border border-dashed border-gray-200 dark:border-zinc-800"><Dumbbell className="w-10 h-10 mx-auto mb-2 opacity-20" /><p>No workouts logged yet.</p></div>
       ) : (
-        workouts.map((workout) => (
+        workouts.map((workout) => {
+          // Helper to display exercises in summary card
+          const previewExercises = workout.exercises ? groupExercises(workout.exercises) : [];
+
+          return (
           <div key={workout.id} onClick={() => toggleExpand(workout.id)} className={`bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-gray-100 dark:border-zinc-800 hover:shadow-md transition-all cursor-pointer overflow-hidden ${expandedId === workout.id ? 'ring-2 ring-blue-100 dark:ring-blue-900' : ''}`}>
             <div className="p-5">
               <div className="flex justify-between items-start mb-3">
                 <div><h4 className="font-bold text-gray-900 dark:text-white text-lg">{workout.name}</h4><div className="text-sm text-gray-500 dark:text-zinc-500 flex items-center gap-1"><Calendar className="w-3 h-3" />{workout.date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}<span className="mx-1">•</span>{workout.exercises?.length || 0} Exercises</div></div>
                 <div className="flex items-center gap-2">
-                  {/* Repeat Button Added Here */}
                   <button onClick={(e) => { e.stopPropagation(); onRepeat(workout); }} className="text-gray-300 dark:text-zinc-600 hover:text-blue-500 dark:hover:text-blue-400 p-2 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-full transition-colors" title="Repeat Workout">
                     <Repeat className="w-4 h-4" />
                   </button>
@@ -880,36 +966,59 @@ function WorkoutHistory({ user, workouts, onRepeat }) {
               </div>
               {expandedId !== workout.id && (
                 <div className="space-y-2">
-                  {workout.exercises?.slice(0, 3).map((ex, i) => (
-                    <div key={i} className="flex justify-between items-center text-sm"><span className="font-medium text-gray-700 dark:text-zinc-300">{ex.name}</span><span className="text-gray-400 dark:text-zinc-500 text-xs">{ex.sets?.length} sets • Max {Math.max(...(ex.sets || []).map(s => s.kg || 0))}kg</span></div>
-                  ))}
-                  {workout.exercises?.length > 3 && <div className="text-xs text-center text-blue-500 dark:text-blue-400 pt-1 font-medium">+ {workout.exercises.length - 3} more exercises</div>}
+                  {previewExercises.slice(0, 3).map((group, i) => {
+                    const isSuperset = group.length > 1;
+                    if (isSuperset) {
+                      return (
+                        <div key={i} className="flex flex-col border-l-2 border-orange-400 pl-2">
+                          {group.map((ex, j) => (
+                            <div key={j} className="flex justify-between items-center text-sm mb-1 last:mb-0">
+                                <span className="font-medium text-gray-700 dark:text-zinc-300 text-xs">{ex.name}</span>
+                                <span className="text-gray-400 dark:text-zinc-500 text-[10px]">{ex.sets?.length} sets</span>
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    }
+                    const ex = group[0];
+                    return (
+                       <div key={i} className="flex justify-between items-center text-sm"><span className="font-medium text-gray-700 dark:text-zinc-300">{ex.name}</span><span className="text-gray-400 dark:text-zinc-500 text-xs">{ex.sets?.length} sets • Max {Math.max(...(ex.sets || []).map(s => s.kg || 0))}kg</span></div>
+                    );
+                  })}
+                  {previewExercises.length > 3 && <div className="text-xs text-center text-blue-500 dark:text-blue-400 pt-1 font-medium">+ {previewExercises.length - 3} more</div>}
                 </div>
               )}
             </div>
             {expandedId === workout.id && (
               <div className="bg-gray-50/50 dark:bg-zinc-800/50 border-t border-gray-100 dark:border-zinc-800 p-5 animate-in slide-in-from-top-2 duration-200">
                 <div className="space-y-6">
-                  {workout.exercises?.map((ex, i) => (
-                    <div key={i} className="bg-white dark:bg-zinc-900 rounded-lg p-4 border border-gray-100 dark:border-zinc-800 shadow-sm">
-                      <div className="flex justify-between items-start mb-3 border-b border-gray-50 dark:border-zinc-800 pb-2">
-                        <div>
-                            <h5 className="font-bold text-gray-800 dark:text-white">{ex.name}</h5>
-                            {ex.notes && <p className="text-xs text-gray-500 dark:text-zinc-400 italic mt-1">"{ex.notes}"</p>}
-                        </div>
-                        <div className="text-xs text-gray-500 dark:text-zinc-500 flex flex-col items-end gap-0.5">
-                           {ex.settings?.seat && <span className="bg-gray-100 dark:bg-zinc-800 px-2 py-0.5 rounded text-gray-600 dark:text-zinc-400 flex items-center gap-1"><Settings2 className="w-3 h-3" /> Seat: {ex.settings.seat}</span>}
-                           {ex.settings?.incline && <span className="bg-gray-100 dark:bg-zinc-800 px-2 py-0.5 rounded text-gray-600 dark:text-zinc-400 flex items-center gap-1"><TrendingUp className="w-3 h-3" /> Inc: {ex.settings.incline}</span>}
-                        </div>
+                  {previewExercises.map((group, groupIndex) => (
+                    <div key={groupIndex} className={`rounded-xl ${group.length > 1 ? 'border-l-4 border-orange-400 pl-3 py-1' : ''}`}>
+                      {group.length > 1 && <div className="text-[10px] font-bold text-orange-500 mb-2 uppercase tracking-wider flex items-center gap-1"><Link className="w-3 h-3" /> Superset</div>}
+                      <div className="space-y-4">
+                        {group.map((ex, i) => (
+                          <div key={i} className="bg-white dark:bg-zinc-900 rounded-lg p-4 border border-gray-100 dark:border-zinc-800 shadow-sm">
+                            <div className="flex justify-between items-start mb-3 border-b border-gray-50 dark:border-zinc-800 pb-2">
+                              <div>
+                                  <h5 className="font-bold text-gray-800 dark:text-white">{ex.name}</h5>
+                                  {ex.notes && <p className="text-xs text-gray-500 dark:text-zinc-400 italic mt-1">"{ex.notes}"</p>}
+                              </div>
+                              <div className="text-xs text-gray-500 dark:text-zinc-500 flex flex-col items-end gap-0.5">
+                                {ex.settings?.seat && <span className="bg-gray-100 dark:bg-zinc-800 px-2 py-0.5 rounded text-gray-600 dark:text-zinc-400 flex items-center gap-1"><Settings2 className="w-3 h-3" /> Seat: {ex.settings.seat}</span>}
+                                {ex.settings?.incline && <span className="bg-gray-100 dark:bg-zinc-800 px-2 py-0.5 rounded text-gray-600 dark:text-zinc-400 flex items-center gap-1"><TrendingUp className="w-3 h-3" /> Inc: {ex.settings.incline}</span>}
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2">{ex.sets?.map((set, idx) => (<div key={idx} className="bg-gray-50 dark:bg-zinc-800 p-2 rounded text-center border border-gray-100 dark:border-zinc-800"><div className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase font-bold mb-1">Set {idx + 1}</div><div className="font-mono font-medium text-gray-800 dark:text-zinc-200 text-sm"><span className="font-bold text-base">{set.kg}</span>kg × {set.reps}</div></div>))}</div>
+                          </div>
+                        ))}
                       </div>
-                      <div className="grid grid-cols-3 gap-2">{ex.sets?.map((set, idx) => (<div key={idx} className="bg-gray-50 dark:bg-zinc-800 p-2 rounded text-center border border-gray-100 dark:border-zinc-800"><div className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase font-bold mb-1">Set {idx + 1}</div><div className="font-mono font-medium text-gray-800 dark:text-zinc-200 text-sm"><span className="font-bold text-base">{set.kg}</span>kg × {set.reps}</div></div>))}</div>
                     </div>
                   ))}
                 </div>
               </div>
             )}
           </div>
-        ))
+        )})
       )}
     </div>
   );
