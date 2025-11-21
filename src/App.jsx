@@ -3,16 +3,18 @@ import {
   Plus, Trash2, Save, History, Dumbbell, Calendar, Settings2, 
   TrendingUp, CheckCircle2, Circle, Activity, Home, Trophy, 
   Zap, Sparkles, Loader2, X, ChevronDown, ChevronUp, Repeat, 
-  BarChart3, Layers, MessageSquareQuote, Moon, Sun
+  BarChart3, Layers, MessageSquareQuote, Moon, Sun, LogOut, Mail, Lock, User, AlertCircle
 } from 'lucide-react';
 
 // npm install firebase
 import { initializeApp } from 'firebase/app';
 import { 
   getAuth, 
-  signInAnonymously, 
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   signInWithCustomToken,
-  onAuthStateChanged 
+  signOut,
+  onAuthStateChanged
 } from 'firebase/auth';
 import { 
   getFirestore, 
@@ -125,36 +127,39 @@ export default function App() {
   const [workouts, setWorkouts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [logTemplate, setLogTemplate] = useState(null);
-  
-  // Dark Mode State
   const [darkMode, setDarkMode] = useState(false);
 
   // 1. AUTHENTICATION
   useEffect(() => {
     const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+      // If we have a system token, use it (auto-login for env)
+      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        try {
           await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
+        } catch (e) {
+          console.error("System token failed", e);
         }
-      } catch (error) {
-        console.error("Auth failed", error);
       }
+      // Otherwise, we wait for user to manually login via the UI
     };
     initAuth();
     
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
-      if (!u) setLoading(false);
+      setLoading(false); // Stop loading once we know if we have a user or not
     });
     return () => unsubscribe();
   }, []);
 
   // 2. DATABASE
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setWorkouts([]);
+      return;
+    }
     
+    // Real path: artifacts/{appId}/users/{user.uid}/workouts
+    // This guarantees data is saved to THIS specific logged-in user
     const q = query(
       collection(db, 'artifacts', appId, 'users', user.uid, 'workouts'),
       orderBy('date', 'desc')
@@ -167,10 +172,8 @@ export default function App() {
         date: doc.data().date ? doc.data().date.toDate() : new Date()
       }));
       setWorkouts(data);
-      setLoading(false);
     }, (error) => {
         console.error("History fetch error", error);
-        setLoading(false);
     });
     return () => unsubscribe();
   }, [user]);
@@ -180,12 +183,26 @@ export default function App() {
     setActiveTab('log');
   };
 
-  if (loading) return <div className="flex h-screen items-center justify-center text-blue-500 font-medium animate-pulse bg-gray-50 dark:bg-zinc-950 dark:text-blue-400">Welcome to Dev's invention</div>;
-  if (!user) return <div className="flex h-screen items-center justify-center bg-gray-50 dark:bg-zinc-950 dark:text-white">Please sign in.</div>;
+  const handleLogout = async () => {
+    await signOut(auth);
+    setActiveTab('home');
+  };
+
+  if (loading) return <div className="flex h-screen items-center justify-center text-blue-500 font-medium animate-pulse bg-gray-50 dark:bg-zinc-950 dark:text-blue-400">Loading IronLog...</div>;
+
+  // If not logged in, show Auth Screen
+  if (!user) {
+    return (
+      <div className={darkMode ? 'dark' : ''}>
+        <AuthScreen darkMode={darkMode} setDarkMode={setDarkMode} />
+      </div>
+    );
+  }
 
   return (
     <div className={darkMode ? 'dark' : ''}>
       <div className="min-h-screen bg-gray-50 dark:bg-zinc-950 text-gray-800 dark:text-zinc-200 pb-24 font-sans select-none transition-colors duration-300">
+        {/* Header */}
         <nav className="bg-white dark:bg-zinc-900 shadow-sm dark:shadow-zinc-900 sticky top-0 z-10 px-4 py-3 flex justify-between items-center border-b border-transparent dark:border-zinc-800">
           <div className="flex items-center gap-2">
             <div className="bg-blue-600 p-1.5 rounded-lg shadow-blue-200 dark:shadow-none shadow-md">
@@ -193,20 +210,30 @@ export default function App() {
             </div>
             <span className="font-bold text-xl tracking-tight text-gray-900 dark:text-white">IronLog</span>
           </div>
-          <button 
-            onClick={() => setDarkMode(!darkMode)} 
-            className="p-2 rounded-full bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-200 dark:hover:bg-zinc-700 transition-colors"
-          >
-            {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-          </button>
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={() => setDarkMode(!darkMode)} 
+              className="p-2 rounded-full bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-200 dark:hover:bg-zinc-700 transition-colors"
+            >
+              {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </button>
+            <button 
+              onClick={handleLogout}
+              className="p-2 rounded-full bg-red-50 dark:bg-red-900/20 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
+              title="Sign Out"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
+          </div>
         </nav>
 
         <main className="max-w-md mx-auto p-4">
-          {activeTab === 'home' && <Dashboard workouts={workouts} setActiveTab={setActiveTab} onRepeat={handleRepeat} />}
+          {activeTab === 'home' && <Dashboard workouts={workouts} setActiveTab={setActiveTab} onRepeat={handleRepeat} user={user} />}
           {activeTab === 'log' && <WorkoutLogger user={user} workouts={workouts} initialData={logTemplate} onSave={() => { setLogTemplate(null); setActiveTab('home'); }} />}
           {activeTab === 'history' && <WorkoutHistory user={user} workouts={workouts} />}
         </main>
 
+        {/* Bottom Navigation */}
         <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-zinc-900 border-t border-gray-200 dark:border-zinc-800 px-6 py-2 flex justify-around items-center z-20 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
           <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-all ${activeTab === 'home' ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-zinc-800' : 'text-gray-400 dark:text-zinc-500 hover:bg-gray-50 dark:hover:bg-zinc-800'}`}>
             <Home className="w-5 h-5" />
@@ -227,9 +254,136 @@ export default function App() {
   );
 }
 
-// --- Sub-Components ---
+// --- New Authentication Component ---
 
-function Dashboard({ workouts, setActiveTab, onRepeat }) {
+function AuthScreen({ darkMode, setDarkMode }) {
+  const [isLogin, setIsLogin] = useState(true);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      if (isLogin) {
+        await signInWithEmailAndPassword(auth, email, password);
+      } else {
+        await createUserWithEmailAndPassword(auth, email, password);
+      }
+    } catch (err) {
+      // Improved Error Handling
+      console.log(err.code);
+      let msg = err.message;
+      if (msg.includes('operation-not-allowed')) {
+        msg = "Authentication disabled. Enable 'Email/Password' in Firebase Console > Authentication.";
+      } else if (msg.includes('email-already-in-use')) {
+        msg = "Email already in use. Try signing in instead.";
+      } else if (msg.includes('weak-password')) {
+        msg = "Password is too weak (min 6 characters).";
+      } else if (msg.includes('invalid-credential') || msg.includes('wrong-password') || msg.includes('user-not-found')) {
+        msg = "Incorrect email or password.";
+      }
+      setError(msg.replace('Firebase: ', '').replace('auth/', ''));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 dark:bg-zinc-950 flex flex-col items-center justify-center p-6 transition-colors duration-300">
+      <div className="w-full max-w-sm">
+        <div className="flex flex-col items-center mb-8">
+          <div className="bg-blue-600 p-4 rounded-2xl shadow-xl shadow-blue-200 dark:shadow-blue-900/20 mb-4">
+            <Activity className="text-white w-10 h-10" />
+          </div>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white tracking-tight">IronLog</h1>
+          <p className="text-gray-500 dark:text-zinc-400 mt-2">Track your progress, hit your goals.</p>
+        </div>
+
+        <div className="bg-white dark:bg-zinc-900 p-8 rounded-3xl shadow-lg border border-gray-100 dark:border-zinc-800">
+          <div className="flex gap-4 mb-8 bg-gray-100 dark:bg-zinc-800 p-1 rounded-xl">
+            <button 
+              onClick={() => { setIsLogin(true); setError(''); }} 
+              className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${isLogin ? 'bg-white dark:bg-zinc-700 text-gray-900 dark:text-white shadow-sm' : 'text-gray-400 dark:text-zinc-500'}`}
+            >
+              Sign In
+            </button>
+            <button 
+              onClick={() => { setIsLogin(false); setError(''); }} 
+              className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${!isLogin ? 'bg-white dark:bg-zinc-700 text-gray-900 dark:text-white shadow-sm' : 'text-gray-400 dark:text-zinc-500'}`}
+            >
+              Sign Up
+            </button>
+          </div>
+
+          <form onSubmit={handleAuth} className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-gray-500 dark:text-zinc-500 uppercase tracking-wider ml-1">Email</label>
+              <div className="flex items-center gap-3 bg-gray-50 dark:bg-zinc-800 px-4 py-3 rounded-xl border border-transparent focus-within:border-blue-500 focus-within:bg-white dark:focus-within:bg-zinc-900 transition-all">
+                <Mail className="w-5 h-5 text-gray-400" />
+                <input 
+                  type="email" 
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com" 
+                  className="bg-transparent w-full outline-none text-gray-800 dark:text-white placeholder-gray-400"
+                  required 
+                />
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-gray-500 dark:text-zinc-500 uppercase tracking-wider ml-1">Password</label>
+              <div className="flex items-center gap-3 bg-gray-50 dark:bg-zinc-800 px-4 py-3 rounded-xl border border-transparent focus-within:border-blue-500 focus-within:bg-white dark:focus-within:bg-zinc-900 transition-all">
+                <Lock className="w-5 h-5 text-gray-400" />
+                <input 
+                  type="password" 
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••" 
+                  className="bg-transparent w-full outline-none text-gray-800 dark:text-white placeholder-gray-400"
+                  required 
+                  minLength={6}
+                />
+              </div>
+            </div>
+
+            {error && (
+              <div className="p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/50 text-red-600 dark:text-red-400 text-xs font-medium flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /> 
+                <span>{error}</span>
+              </div>
+            )}
+
+            <button 
+              type="submit" 
+              disabled={loading}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-200 dark:shadow-none transition-all active:scale-[0.98] disabled:opacity-70 flex justify-center items-center"
+            >
+              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (isLogin ? "Sign In" : "Create Account")}
+            </button>
+          </form>
+        </div>
+        
+        <div className="mt-8 flex justify-center">
+           <button 
+              onClick={() => setDarkMode(!darkMode)} 
+              className="p-3 rounded-full bg-gray-100 dark:bg-zinc-900 text-gray-600 dark:text-zinc-500 hover:bg-gray-200 dark:hover:bg-zinc-800 transition-colors"
+            >
+              {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Sub-Components (Unchanged Logic, updated user prop usage) ---
+
+function Dashboard({ workouts, setActiveTab, onRepeat, user }) {
   const [coachTip, setCoachTip] = useState(null);
   const [loadingTip, setLoadingTip] = useState(false);
   const [chartMetric, setChartMetric] = useState('volume');
@@ -308,7 +462,12 @@ function Dashboard({ workouts, setActiveTab, onRepeat }) {
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1><p className="text-gray-500 dark:text-zinc-400 text-sm">{totalWorkouts > 0 ? "Keep up the momentum!" : "Ready to start?"}</p></div>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
+          <div className="flex items-center gap-2 text-gray-500 dark:text-zinc-400 text-sm">
+             <User className="w-3 h-3" /> {user.email || 'User'}
+          </div>
+        </div>
         <div className="bg-blue-50 dark:bg-zinc-900 text-blue-700 dark:text-blue-400 px-3 py-2 rounded-xl flex items-center gap-2 shadow-sm border border-blue-100 dark:border-zinc-800"><div className="relative"><Circle className="w-8 h-8 text-blue-200 dark:text-blue-900" strokeWidth={4} /><div className="absolute inset-0 flex items-center justify-center text-[10px] font-bold">{weeklyProgress}</div></div><div className="flex flex-col leading-none"><span className="text-[10px] text-blue-400 font-bold uppercase">This Week</span><span className="text-xs font-bold">Sessions</span></div></div>
       </div>
 
@@ -552,6 +711,7 @@ function WorkoutHistory({ user, workouts }) {
   const deleteWorkout = async (e, id) => {
     e.stopPropagation();
     if(window.confirm("Delete this workout log?")) {
+      // Use stableId here as well
       try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'workouts', id)); } catch (e) { console.error("Error deleting", e); }
     }
   }
