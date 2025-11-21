@@ -31,10 +31,15 @@ import {
 // --- CONFIGURATION SECTION ---
 
 // 1. API KEY: REMOVED
-// We no longer need the API key here because the backend handles it!
+// The frontend now asks the backend (/api/gemini) to handle the key securely.
 
 // 2. FIREBASE CONFIG:
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'ironlog-default';
+// CRITICAL FOR SYNC: 
+// We use a fixed ID ('ironlog-production') when on Vercel. 
+// This ensures that no matter what device you are on, if you are on the deployed site,
+// you access the same data bucket.
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'ironlog-production';
+
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
   apiKey: "AIzaSyChWVF80MJkmabCDXAT40mk9jBQGhIT-1g",
   authDomain: "ironlog-ed2d9.firebaseapp.com",
@@ -53,7 +58,7 @@ const db = getFirestore(app);
 // --- Helper Functions ---
 
 async function callGemini(prompt, systemInstruction = "You are a helpful assistant.") {
-  // UPDATED: Call our own Vercel Backend instead of Google directly
+  // Call our secure backend endpoint
   const url = '/api/gemini'; 
   
   const payload = {
@@ -72,13 +77,11 @@ async function callGemini(prompt, systemInstruction = "You are a helpful assista
         body: JSON.stringify(payload)
       });
       
-      // Parse the response from OUR backend
       const data = await response.json();
 
       if (!response.ok) {
-        // If 404, it means the /api/gemini route is missing (e.g., running locally without 'vercel dev')
         if (response.status === 404) {
-          throw new Error("Backend API not found. Please deploy to Vercel to use AI features.");
+          throw new Error("Backend API not found. Please deploy to Vercel.");
         }
         throw new Error(data.error || `HTTP error! status: ${response.status}`);
       }
@@ -156,13 +159,16 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. DATABASE
+  // 2. DATABASE (Cross-Device Sync Logic)
   useEffect(() => {
     if (!user) {
       setWorkouts([]);
       return;
     }
     
+    // This query listens to the user's specific data collection in the cloud.
+    // Because 'appId' is constant on Vercel and 'user.uid' is consistent for the account,
+    // this guarantees you see the same data on every device.
     const q = query(
       collection(db, 'artifacts', appId, 'users', user.uid, 'workouts'),
       orderBy('date', 'desc')
@@ -276,7 +282,6 @@ function AuthScreen({ darkMode, setDarkMode }) {
         await createUserWithEmailAndPassword(auth, email, password);
       }
     } catch (err) {
-      // Improved Error Handling
       console.log(err.code);
       let msg = err.message;
       if (msg.includes('operation-not-allowed')) {
@@ -383,7 +388,7 @@ function AuthScreen({ darkMode, setDarkMode }) {
   );
 }
 
-// --- Sub-Components (Unchanged Logic, updated user prop usage) ---
+// --- Sub-Components ---
 
 function Dashboard({ workouts, setActiveTab, onRepeat, user }) {
   const [coachTip, setCoachTip] = useState(null);
@@ -410,8 +415,7 @@ function Dashboard({ workouts, setActiveTab, onRepeat, user }) {
                 records[name] = { ...bestSetInSession, date: workout.date };
             } else {
                 const currentRecord = records[name];
-                if (bestSetInSession.kg > currentRecord.kg || 
-                   (bestSetInSession.kg === currentRecord.kg && bestSetInSession.reps > currentRecord.reps)) {
+                if (bestSetInSession.kg > currentRecord.kg || (bestSetInSession.kg === currentRecord.kg && bestSetInSession.reps > currentRecord.reps)) {
                     records[name] = { ...bestSetInSession, date: workout.date };
                 }
             }
@@ -451,6 +455,8 @@ function Dashboard({ workouts, setActiveTab, onRepeat, user }) {
         exercises: w.exercises.map(e => e.name).join(', ')
       }));
       const prompt = `Analyze these recent workouts: ${JSON.stringify(recentHistory)}. Give me one short, specific, and motivating insight or tip (under 30 words) for my next session. Return valid JSON: { "tip": "string" }`;
+      
+      // CALLS BACKEND API NOW
       const result = await callGemini(prompt, "You are an elite fitness coach.");
       setCoachTip(result?.tip || "Keep pushing!");
     } catch (e) {
@@ -540,8 +546,22 @@ function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
   const [workoutName, setWorkoutName] = useState('Evening Lift');
   const [exercises, setExercises] = useState([{ id: crypto.randomUUID(), name: 'Chest Press', notes: '', settings: { seat: '', incline: '' }, sets: [{ id: crypto.randomUUID(), kg: '', reps: '', completed: false }] }]);
   
+  // DRAFT LOGIC: Load saved draft on mount
   useEffect(() => {
-    if (initialData) {
+    // Only load draft if we are NOT editing/repeating an existing workout
+    if (!initialData) {
+      try {
+        const savedDraft = localStorage.getItem(`ironlog_draft_${user.uid}`);
+        if (savedDraft) {
+          const parsed = JSON.parse(savedDraft);
+          if (parsed.name) setWorkoutName(parsed.name);
+          if (parsed.exercises && parsed.exercises.length > 0) setExercises(parsed.exercises);
+        }
+      } catch (e) {
+        console.error("Failed to load draft", e);
+      }
+    } else {
+      // If initialData exists (Repeating a workout), load that instead
       setWorkoutName(initialData.name || 'Evening Lift');
       if (initialData.exercises && initialData.exercises.length > 0) {
         setExercises(initialData.exercises.map(ex => ({
@@ -549,7 +569,15 @@ function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
         })));
       }
     }
-  }, [initialData]);
+  }, [initialData, user.uid]);
+
+  // DRAFT LOGIC: Save draft on every change
+  useEffect(() => {
+    if (!initialData) {
+      const draftData = { name: workoutName, exercises };
+      localStorage.setItem(`ironlog_draft_${user.uid}`, JSON.stringify(draftData));
+    }
+  }, [workoutName, exercises, user.uid, initialData]);
 
   const [isSaving, setIsSaving] = useState(false);
   const [showAIModal, setShowAIModal] = useState(false);
@@ -574,7 +602,10 @@ function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
         3. Create workout for request: "${aiPrompt}"
         Return JSON: { "workoutName": "string", "exercises": [ { "name": "string", "notes": "string", "settings": { "seat": "", "incline": "" }, "sets": [ { "kg": number, "reps": number } ] } ] }
       `;
+      
+      // CALLS BACKEND API NOW
       const result = await callGemini(aiPrompt, systemInstruction);
+      
       if (result && result.exercises) {
         setWorkoutName(result.workoutName || "AI Generated Workout");
         const processedExercises = result.exercises.map(ex => ({
@@ -585,8 +616,8 @@ function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
         setAiPrompt('');
       }
     } catch (e) {
-      console.error("AI Gen Error", e);
-      alert("Failed to generate workout. Check API Key.");
+      console.error("AI Gen Error caught in handler", e);
+      alert("Failed to generate workout. Ensure your backend API is deployed and working.");
     } finally {
       setIsGenerating(false);
     }
@@ -611,12 +642,17 @@ function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
         settings: e.settings,
         sets: e.sets.map(s => ({ kg: Number(s.kg), reps: Number(s.reps) }))
       }));
+      // Use the stable appId here too
       await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'workouts'), {
         name: workoutName,
         date: serverTimestamp(),
         exercises: validExercises,
         totalVolume: validExercises.reduce((acc, ex) => acc + ex.sets.reduce((sAcc, s) => sAcc + (s.kg * s.reps), 0), 0)
       });
+      
+      // Clear draft on success
+      localStorage.removeItem(`ironlog_draft_${user.uid}`);
+      
       setWorkoutName('Next Workout');
       setExercises([]);
       if(onSave) onSave(); 
