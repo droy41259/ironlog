@@ -746,18 +746,92 @@ function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
 
 function WorkoutHistory({ user, workouts }) {
   const [expandedId, setExpandedId] = useState(null);
+  const [aiSummary, setAiSummary] = useState(null);
+  const [isSummarizing, setIsSummarizing] = useState(false);
+
   const deleteWorkout = async (e, id) => {
     e.stopPropagation();
     if(window.confirm("Delete this workout log?")) {
-      // Use stableId here as well
       try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'workouts', id)); } catch (e) { console.error("Error deleting", e); }
     }
   }
   const toggleExpand = (id) => setExpandedId(expandedId === id ? null : id);
 
+  const handleGenerateSummary = async () => {
+    if (workouts.length < 3) {
+      alert("Log at least 3 workouts to get a meaningful analysis.");
+      return;
+    }
+    setIsSummarizing(true);
+    try {
+      // Prepare lightweight data for AI to save tokens
+      const historyContext = workouts.slice(0, 20).map(w => ({
+        date: w.date.toLocaleDateString(),
+        title: w.name,
+        volume: w.totalVolume,
+        exercises: w.exercises?.map(e => `${e.name} (${Math.max(...(e.sets || []).map(s => Number(s.kg)||0))}kg top set)`).join(', ')
+      }));
+
+      const prompt = `
+        You are an elite strength and conditioning coach. 
+        Analyze this user's last 20 workouts (newest first): ${JSON.stringify(historyContext)}.
+        
+        Output a JSON object with a single field "analysis" containing a paragraph that:
+        1. Identifies the user's training focus/consistency.
+        2. Points out a specific weakness or neglected area (e.g. "You push chest often but skip legs").
+        3. Gives a direct command for what to focus on next (e.g. "Focus on increasing squat depth next time").
+        
+        Keep it professional, encouraging, but analytical. Max 80 words.
+        JSON format: { "analysis": "string" }
+      `;
+
+      const data = await callGemini(prompt, "You are a data-driven fitness analyst.");
+      if (data && data.analysis) {
+        setAiSummary(data.analysis);
+      }
+    } catch (e) {
+      console.error("Analysis failed", e);
+      alert("Could not generate analysis. Try again later.");
+    } finally {
+      setIsSummarizing(false);
+    }
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex justify-between items-center"><h3 className="font-bold text-lg text-gray-900 dark:text-white">Workout History</h3><span className="text-xs text-gray-500 dark:text-zinc-500 bg-gray-100 dark:bg-zinc-800 px-2 py-1 rounded-full">{workouts.length} sessions</span></div>
+      <div className="flex justify-between items-center">
+        <h3 className="font-bold text-lg text-gray-900 dark:text-white">Workout History</h3>
+        <span className="text-xs text-gray-500 dark:text-zinc-500 bg-gray-100 dark:bg-zinc-800 px-2 py-1 rounded-full">{workouts.length} sessions</span>
+      </div>
+
+      {/* AI Analysis Section */}
+      {workouts.length > 0 && (
+        <div className="bg-gradient-to-br from-indigo-500 to-blue-600 rounded-xl p-5 text-white shadow-lg shadow-blue-200 dark:shadow-none relative overflow-hidden">
+           <div className="absolute top-0 right-0 p-4 opacity-10"><Activity size={100} /></div>
+           <div className="relative z-10">
+             <div className="flex justify-between items-start mb-2">
+                <h4 className="font-bold flex items-center gap-2"><Sparkles className="w-4 h-4 text-yellow-300" /> Progress Report</h4>
+             </div>
+             
+             {isSummarizing ? (
+               <div className="flex items-center gap-2 text-indigo-100 py-2"><Loader2 className="w-4 h-4 animate-spin" /> Analyzing your training data...</div>
+             ) : aiSummary ? (
+               <div className="animate-in fade-in">
+                 <p className="text-sm leading-relaxed text-indigo-50 font-medium">{aiSummary}</p>
+                 <button onClick={() => setAiSummary(null)} className="mt-3 text-xs text-indigo-200 hover:text-white flex items-center gap-1 hover:underline">Close Analysis</button>
+               </div>
+             ) : (
+               <div>
+                 <p className="text-xs text-indigo-100 mb-3">Get an AI-powered breakdown of your training trends and what to improve.</p>
+                 <button onClick={handleGenerateSummary} className="bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white text-xs font-bold py-2 px-3 rounded-lg transition-all flex items-center gap-2">
+                   <Zap className="w-3 h-3" /> Analyze History
+                 </button>
+               </div>
+             )}
+           </div>
+        </div>
+      )}
+
       {workouts.length === 0 ? (
         <div className="text-center py-10 text-gray-400 dark:text-zinc-600 bg-white dark:bg-zinc-900 rounded-xl border border-dashed border-gray-200 dark:border-zinc-800"><Dumbbell className="w-10 h-10 mx-auto mb-2 opacity-20" /><p>No workouts logged yet.</p></div>
       ) : (
