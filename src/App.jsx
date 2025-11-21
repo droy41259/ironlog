@@ -30,12 +30,12 @@ import {
 
 // --- CONFIGURATION SECTION ---
 
-// FOR VERCEL DEPLOYMENT:
-// We must provide the key here because Vercel doesn't inject it automatically like the preview does.
-// Ideally, you should set this in Vercel Settings > Environment Variables as VITE_GEMINI_API_KEY
-const apiKey = "AIzaSyAZE5siicNIlFLbivoaxkXxbjqifiJGlF8"; 
+// 1. API KEY:
+// FOR PREVIEW (Here): Keep this empty (""). The system automatically authenticates.
+// FOR VERCEL: You MUST paste your new valid API key here.
+const apiKey = "AIzaSyCtHCMX8ppgUEc5HTcT6jPI_MPh-0bplkM"; 
 
-// System-provided global variables (fallback for local testing)
+// 2. FIREBASE CONFIG:
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'ironlog-default';
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
   apiKey: "AIzaSyChWVF80MJkmabCDXAT40mk9jBQGhIT-1g",
@@ -55,13 +55,11 @@ const db = getFirestore(app);
 // --- Helper Functions ---
 
 async function callGemini(prompt, systemInstruction = "You are a helpful assistant.") {
-  // Ensure we have a key before making the call
-  if (!apiKey) {
-    console.error("API Key is missing. Please add it to the apiKey constant.");
-    throw new Error("API Key is missing");
-  }
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+  // NOTE: This preview environment ONLY supports the 'preview' model with the auto-injected key.
+  // When deploying to Vercel with your own key, you can switch this back to 'gemini-2.5-flash'.
+  const model = "gemini-2.5-flash-preview-09-2025"; 
+  
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   
   const payload = {
     contents: [{ parts: [{ text: prompt }] }],
@@ -80,13 +78,18 @@ async function callGemini(prompt, systemInstruction = "You are a helpful assista
         body: JSON.stringify(payload)
       });
       
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error(`Gemini API Error (${response.status}):`, errText);
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       
       const data = await response.json();
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
       return JSON.parse(text);
     } catch (e) {
       attempt++;
+      console.warn(`Attempt ${attempt} failed. Retrying...`);
       if (attempt >= maxRetries) throw e;
       await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
     }
@@ -137,7 +140,6 @@ export default function App() {
   // 1. AUTHENTICATION
   useEffect(() => {
     const initAuth = async () => {
-      // If we have a system token, use it (auto-login for env)
       if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
         try {
           await signInWithCustomToken(auth, __initial_auth_token);
@@ -145,13 +147,12 @@ export default function App() {
           console.error("System token failed", e);
         }
       }
-      // Otherwise, we wait for user to manually login via the UI
     };
     initAuth();
     
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
-      setLoading(false); // Stop loading once we know if we have a user or not
+      setLoading(false); 
     });
     return () => unsubscribe();
   }, []);
@@ -163,8 +164,6 @@ export default function App() {
       return;
     }
     
-    // Real path: artifacts/{appId}/users/{user.uid}/workouts
-    // This guarantees data is saved to THIS specific logged-in user
     const q = query(
       collection(db, 'artifacts', appId, 'users', user.uid, 'workouts'),
       orderBy('date', 'desc')
@@ -195,7 +194,6 @@ export default function App() {
 
   if (loading) return <div className="flex h-screen items-center justify-center text-blue-500 font-medium animate-pulse bg-gray-50 dark:bg-zinc-950 dark:text-blue-400">Loading IronLog...</div>;
 
-  // If not logged in, show Auth Screen
   if (!user) {
     return (
       <div className={darkMode ? 'dark' : ''}>
