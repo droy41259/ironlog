@@ -31,8 +31,7 @@ import {
 // --- CONFIGURATION SECTION ---
 
 // 1. API KEY:
-// FOR PREVIEW (Here): Keep this empty (""). The system automatically authenticates.
-// FOR VERCEL: You MUST paste your new valid API key here.
+// This key is used for your Vercel deployment.
 const apiKey = "AIzaSyCtHCMX8ppgUEc5HTcT6jPI_MPh-0bplkM"; 
 
 // 2. FIREBASE CONFIG:
@@ -55,9 +54,16 @@ const db = getFirestore(app);
 // --- Helper Functions ---
 
 async function callGemini(prompt, systemInstruction = "You are a helpful assistant.") {
-  // NOTE: This preview environment ONLY supports the 'preview' model with the auto-injected key.
-  // When deploying to Vercel with your own key, you can switch this back to 'gemini-2.5-flash'.
-  const model = "gemini-2.5-flash-preview-09-2025"; 
+  // 1. Check if key exists
+  if (!apiKey || apiKey.trim() === "") {
+    alert("CRITICAL ERROR: API Key is missing! Please add your key to the 'apiKey' variable in App.jsx.");
+    throw new Error("API Key is missing");
+  }
+
+  // 2. Use the PUBLIC model name.
+  // The previous code used "-preview-09-2025" which is internal-only and rejects public keys.
+  // We switch to the standard "gemini-2.5-flash" which works with your API key.
+  const model = "gemini-2.5-flash"; 
   
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   
@@ -455,7 +461,8 @@ function Dashboard({ workouts, setActiveTab, onRepeat, user }) {
       const result = await callGemini(prompt, "You are an elite fitness coach.");
       setCoachTip(result?.tip || "Keep pushing!");
     } catch (e) {
-      console.error(e);
+      // Error is already logged in callGemini
+      // We just set default text here so the UI doesn't break
       setCoachTip("Consistency is key! Keep pushing your limits.");
     } finally {
       setLoadingTip(false);
@@ -586,8 +593,9 @@ function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
         setAiPrompt('');
       }
     } catch (e) {
-      console.error("AI Gen Error", e);
-      alert("Failed to generate workout. Check API Key.");
+      // Error logging handled in callGemini mostly, but we log here too
+      // We suppress the alert here if it was already alerted in callGemini
+      console.error("AI Gen Error caught in handler", e);
     } finally {
       setIsGenerating(false);
     }
