@@ -30,14 +30,6 @@ import {
 
 // --- CONFIGURATION SECTION ---
 
-// 1. API KEY: REMOVED
-// The frontend now asks the backend (/api/gemini) to handle the key securely.
-
-// 2. FIREBASE CONFIG:
-// CRITICAL FOR SYNC: 
-// We use a fixed ID ('ironlog-production') when on Vercel. 
-// This ensures that no matter what device you are on, if you are on the deployed site,
-// you access the same data bucket.
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'ironlog-production';
 
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
@@ -136,7 +128,6 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [workouts, setWorkouts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [logTemplate, setLogTemplate] = useState(null);
   const [darkMode, setDarkMode] = useState(false);
 
   // 1. AUTHENTICATION
@@ -166,9 +157,6 @@ export default function App() {
       return;
     }
     
-    // This query listens to the user's specific data collection in the cloud.
-    // Because 'appId' is constant on Vercel and 'user.uid' is consistent for the account,
-    // this guarantees you see the same data on every device.
     const q = query(
       collection(db, 'artifacts', appId, 'users', user.uid, 'workouts'),
       orderBy('date', 'desc')
@@ -187,8 +175,19 @@ export default function App() {
     return () => unsubscribe();
   }, [user]);
 
+  // handleRepeat writes directly to localStorage to ensure persistence
   const handleRepeat = (workout) => {
-    setLogTemplate(workout);
+    const template = {
+      name: workout.name,
+      exercises: workout.exercises.map(ex => ({
+        ...ex,
+        id: crypto.randomUUID(),
+        sets: ex.sets.map(s => ({ ...s, id: crypto.randomUUID(), completed: false }))
+      }))
+    };
+    
+    // Save directly to draft storage so WorkoutLogger picks it up
+    localStorage.setItem(`ironlog_draft_${user.uid}`, JSON.stringify(template));
     setActiveTab('log');
   };
 
@@ -237,8 +236,8 @@ export default function App() {
 
         <main className="max-w-md mx-auto p-4">
           {activeTab === 'home' && <Dashboard workouts={workouts} setActiveTab={setActiveTab} onRepeat={handleRepeat} user={user} />}
-          {activeTab === 'log' && <WorkoutLogger user={user} workouts={workouts} initialData={logTemplate} onSave={() => { setLogTemplate(null); setActiveTab('home'); }} />}
-          {activeTab === 'history' && <WorkoutHistory user={user} workouts={workouts} />}
+          {activeTab === 'log' && <WorkoutLogger user={user} workouts={workouts} onSave={() => setActiveTab('home')} />}
+          {activeTab === 'history' && <WorkoutHistory user={user} workouts={workouts} onRepeat={handleRepeat} />}
         </main>
 
         {/* Bottom Navigation */}
@@ -248,7 +247,7 @@ export default function App() {
             <span className="text-[10px] font-bold">Home</span>
           </button>
           <div className="relative -top-5">
-            <button onClick={() => { setLogTemplate(null); setActiveTab('log'); }} className={`flex flex-col items-center justify-center w-14 h-14 rounded-full shadow-lg border-4 border-gray-50 dark:border-zinc-950 transition-all ${activeTab === 'log' ? 'bg-blue-600 text-white scale-110' : 'bg-blue-600 text-white hover:scale-105'}`}>
+            <button onClick={() => setActiveTab('log')} className={`flex flex-col items-center justify-center w-14 h-14 rounded-full shadow-lg border-4 border-gray-50 dark:border-zinc-950 transition-all ${activeTab === 'log' ? 'bg-blue-600 text-white scale-110' : 'bg-blue-600 text-white hover:scale-105'}`}>
               <Plus className="w-7 h-7" />
             </button>
           </div>
@@ -542,42 +541,30 @@ function Dashboard({ workouts, setActiveTab, onRepeat, user }) {
   );
 }
 
-function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
-  const [workoutName, setWorkoutName] = useState('Evening Lift');
-  const [exercises, setExercises] = useState([{ id: crypto.randomUUID(), name: 'Chest Press', notes: '', settings: { seat: '', incline: '' }, sets: [{ id: crypto.randomUUID(), kg: '', reps: '', completed: false }] }]);
+function WorkoutLogger({ user, workouts = [], onSave }) {
+  // UPDATED: Lazy Initialization of State to fix Race Condition
+  // This ensures we read the localStorage IMMEDIATELY when the component mounts,
+  // capturing the "Repeat" data before any useEffects run.
   
-  // DRAFT LOGIC: Load saved draft on mount
-  useEffect(() => {
-    // Only load draft if we are NOT editing/repeating an existing workout
-    if (!initialData) {
-      try {
-        const savedDraft = localStorage.getItem(`ironlog_draft_${user.uid}`);
-        if (savedDraft) {
-          const parsed = JSON.parse(savedDraft);
-          if (parsed.name) setWorkoutName(parsed.name);
-          if (parsed.exercises && parsed.exercises.length > 0) setExercises(parsed.exercises);
-        }
-      } catch (e) {
-        console.error("Failed to load draft", e);
-      }
-    } else {
-      // If initialData exists (Repeating a workout), load that instead
-      setWorkoutName(initialData.name || 'Evening Lift');
-      if (initialData.exercises && initialData.exercises.length > 0) {
-        setExercises(initialData.exercises.map(ex => ({
-          ...ex, id: crypto.randomUUID(), sets: ex.sets.map(s => ({ ...s, id: crypto.randomUUID(), completed: false }))
-        })));
-      }
-    }
-  }, [initialData, user.uid]);
+  const [workoutName, setWorkoutName] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`ironlog_draft_${user.uid}`);
+      return saved ? JSON.parse(saved).name : 'Evening Lift';
+    } catch { return 'Evening Lift'; }
+  });
 
-  // DRAFT LOGIC: Save draft on every change
+  const [exercises, setExercises] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`ironlog_draft_${user.uid}`);
+      return saved ? JSON.parse(saved).exercises : [{ id: crypto.randomUUID(), name: 'Chest Press', notes: '', settings: { seat: '', incline: '' }, sets: [{ id: crypto.randomUUID(), kg: '', reps: '', completed: false }] }];
+    } catch { return [{ id: crypto.randomUUID(), name: 'Chest Press', notes: '', settings: { seat: '', incline: '' }, sets: [{ id: crypto.randomUUID(), kg: '', reps: '', completed: false }] }]; }
+  });
+
+  // UPDATED: DRAFT LOGIC - Save draft on every change
   useEffect(() => {
-    if (!initialData) {
-      const draftData = { name: workoutName, exercises };
-      localStorage.setItem(`ironlog_draft_${user.uid}`, JSON.stringify(draftData));
-    }
-  }, [workoutName, exercises, user.uid, initialData]);
+    const draftData = { name: workoutName, exercises };
+    localStorage.setItem(`ironlog_draft_${user.uid}`, JSON.stringify(draftData));
+  }, [workoutName, exercises, user.uid]);
 
   const [isSaving, setIsSaving] = useState(false);
   const [showAIModal, setShowAIModal] = useState(false);
@@ -588,7 +575,6 @@ function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
     if (!aiPrompt.trim()) return;
     setIsGenerating(true);
     try {
-      // UPDATED: Increased context from 5 to 10 workouts for better generation
       const recentWorkouts = workouts.slice(0, 10).map(w => ({
         name: w.name,
         date: w.date.toLocaleDateString(),
@@ -724,8 +710,8 @@ function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
               {exercise.sets.map((set, index) => (
                 <div key={set.id} className={`grid grid-cols-10 gap-2 items-center group ${set.completed ? 'opacity-50' : 'opacity-100'} transition-opacity`}>
                   <div className="col-span-1 text-center font-medium text-gray-400 dark:text-zinc-600 text-sm">{index + 1}</div>
-                  <div className="col-span-3"><input type="number" placeholder="-" value={set.kg} onChange={(e) => updateSet(exercise.id, set.id, 'kg', e.target.value)} className="w-full text-center bg-gray-50 dark:bg-zinc-800 rounded-lg py-2 font-bold text-gray-700 dark:text-zinc-200 focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-zinc-700 outline-none transition-all" /></div>
-                  <div className="col-span-3"><input type="number" placeholder="-" value={set.reps} onChange={(e) => updateSet(exercise.id, set.id, 'reps', e.target.value)} className="w-full text-center bg-gray-50 dark:bg-zinc-800 rounded-lg py-2 font-bold text-gray-700 dark:text-zinc-200 focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-zinc-700 outline-none transition-all" /></div>
+                  <div className="col-span-3"><input type="number" placeholder="-" value={set.kg} onChange={(e) => updateSet(exercise.id, set.id, 'kg', e.target.value)} disabled={set.completed} className="w-full text-center bg-gray-50 dark:bg-zinc-800 rounded-lg py-2 font-bold text-gray-700 dark:text-zinc-200 focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-zinc-700 outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed" /></div>
+                  <div className="col-span-3"><input type="number" placeholder="-" value={set.reps} onChange={(e) => updateSet(exercise.id, set.id, 'reps', e.target.value)} disabled={set.completed} className="w-full text-center bg-gray-50 dark:bg-zinc-800 rounded-lg py-2 font-bold text-gray-700 dark:text-zinc-200 focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-zinc-700 outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed" /></div>
                   <div className="col-span-3 flex justify-center gap-2">
                     <button onClick={() => updateSet(exercise.id, set.id, 'completed', !set.completed)} className={`p-2 rounded-full transition-all ${set.completed ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' : 'bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-500 hover:bg-gray-200 dark:hover:bg-zinc-700'}`}>{set.completed ? <CheckCircle2 className="w-5 h-5" /> : <Circle className="w-5 h-5" />}</button>
                     {exercise.sets.length > 1 && <button onClick={() => removeSet(exercise.id, set.id)} className="text-gray-300 dark:text-zinc-600 hover:text-red-400"><Trash2 className="w-4 h-4" /></button>}
@@ -738,14 +724,16 @@ function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
         ))}
       </div>
       <div className="flex flex-col gap-3 pt-4">
-        <button onClick={addExercise} className="w-full py-4 rounded-xl border-2 border-dashed border-gray-300 dark:border-zinc-700 text-gray-400 dark:text-zinc-500 hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-zinc-800 transition-all font-semibold flex items-center justify-center gap-2"><Plus className="w-5 h-5" /> Add Exercise</button>
-        <button onClick={finishWorkout} disabled={isSaving} className="w-full py-4 rounded-xl bg-blue-600 text-white font-bold text-lg shadow-lg shadow-blue-200 dark:shadow-none hover:bg-blue-700 hover:shadow-xl hover:scale-[1.01] transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-70">{isSaving ? 'Saving...' : <><Save className="w-5 h-5" /> Finish Workout</>}</button>
+        <button onClick={addExercise} className="w-full py-4 rounded-xl bg-blue-600 text-white font-bold text-lg shadow-lg shadow-blue-200 dark:shadow-none hover:bg-blue-700 hover:shadow-xl hover:scale-[1.01] transition-all active:scale-95 flex items-center justify-center gap-2"><Plus className="w-5 h-5" /> Add Exercise</button>
+        
+        {/* UPDATED: FINISH BUTTON COLOR IS NOW SOLID RED */}
+        <button onClick={finishWorkout} disabled={isSaving} className="w-full py-4 rounded-xl bg-red-600 text-white font-bold text-lg shadow-lg shadow-red-200 dark:shadow-none hover:bg-red-700 hover:shadow-xl hover:scale-[1.01] transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-70">{isSaving ? 'Saving...' : <><Save className="w-5 h-5" /> Finish Workout</>}</button>
       </div>
     </div>
   );
 }
 
-function WorkoutHistory({ user, workouts }) {
+function WorkoutHistory({ user, workouts, onRepeat }) {
   const [expandedId, setExpandedId] = useState(null);
   const [aiSummary, setAiSummary] = useState(null);
   const [isSummarizing, setIsSummarizing] = useState(false);
@@ -881,7 +869,14 @@ function WorkoutHistory({ user, workouts }) {
             <div className="p-5">
               <div className="flex justify-between items-start mb-3">
                 <div><h4 className="font-bold text-gray-900 dark:text-white text-lg">{workout.name}</h4><div className="text-sm text-gray-500 dark:text-zinc-500 flex items-center gap-1"><Calendar className="w-3 h-3" />{workout.date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}<span className="mx-1">•</span>{workout.exercises?.length || 0} Exercises</div></div>
-                <div className="flex items-center gap-2"><button onClick={(e) => deleteWorkout(e, workout.id)} className="text-gray-300 dark:text-zinc-600 hover:text-red-400 p-2 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full transition-colors"><Trash2 className="w-4 h-4" /></button><div className="text-gray-300 dark:text-zinc-600">{expandedId === workout.id ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}</div></div>
+                <div className="flex items-center gap-2">
+                  {/* Repeat Button Added Here */}
+                  <button onClick={(e) => { e.stopPropagation(); onRepeat(workout); }} className="text-gray-300 dark:text-zinc-600 hover:text-blue-500 dark:hover:text-blue-400 p-2 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-full transition-colors" title="Repeat Workout">
+                    <Repeat className="w-4 h-4" />
+                  </button>
+                  <button onClick={(e) => deleteWorkout(e, workout.id)} className="text-gray-300 dark:text-zinc-600 hover:text-red-400 p-2 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full transition-colors"><Trash2 className="w-4 h-4" /></button>
+                  <div className="text-gray-300 dark:text-zinc-600">{expandedId === workout.id ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}</div>
+                </div>
               </div>
               {expandedId !== workout.id && (
                 <div className="space-y-2">
