@@ -29,6 +29,10 @@ import {
 } from 'firebase/firestore';
 
 // --- CONFIGURATION SECTION ---
+
+// FOR VERCEL DEPLOYMENT:
+// We must provide the key here because Vercel doesn't inject it automatically like the preview does.
+// Ideally, you should set this in Vercel Settings > Environment Variables as VITE_GEMINI_API_KEY
 const apiKey = "AIzaSyAZE5siicNIlFLbivoaxkXxbjqifiJGlF8"; 
 
 // System-provided global variables (fallback for local testing)
@@ -51,6 +55,12 @@ const db = getFirestore(app);
 // --- Helper Functions ---
 
 async function callGemini(prompt, systemInstruction = "You are a helpful assistant.") {
+  // Ensure we have a key before making the call
+  if (!apiKey) {
+    console.error("API Key is missing. Please add it to the apiKey constant.");
+    throw new Error("API Key is missing");
+  }
+
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
   
   const payload = {
