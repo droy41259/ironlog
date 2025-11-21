@@ -29,7 +29,7 @@ import {
 } from 'firebase/firestore';
 
 // --- CONFIGURATION SECTION ---
-const apiKey = ""; 
+const apiKey = "AIzaSyAZE5siicNIlFLbivoaxkXxbjqifiJGlF8"; 
 
 // System-provided global variables (fallback for local testing)
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'ironlog-default';
