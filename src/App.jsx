@@ -3,7 +3,7 @@ import {
   Plus, Trash2, Save, History, Dumbbell, Calendar, Settings2, 
   TrendingUp, CheckCircle2, Circle, Activity, Home, Trophy, 
   Zap, Sparkles, Loader2, X, ChevronDown, ChevronUp, Repeat, 
-  BarChart3, Layers, MessageSquareQuote, Moon, Sun, LogOut, Mail, Lock, User, AlertCircle
+  BarChart3, Layers, MessageSquareQuote, Moon, Sun, LogOut, Mail, Lock, User, AlertCircle, Download
 } from 'lucide-react';
 
 // npm install firebase
@@ -588,7 +588,8 @@ function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
     if (!aiPrompt.trim()) return;
     setIsGenerating(true);
     try {
-      const recentWorkouts = workouts.slice(0, 5).map(w => ({
+      // UPDATED: Increased context from 5 to 10 workouts for better generation
+      const recentWorkouts = workouts.slice(0, 10).map(w => ({
         name: w.name,
         date: w.date.toLocaleDateString(),
         exercises: w.exercises.map(e => `${e.name} (${e.sets.length} sets)`).join(', ')
@@ -674,7 +675,7 @@ function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
               <button onClick={() => setShowAIModal(false)} className="hover:bg-white/20 p-1 rounded-full"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-5 space-y-4">
-              <div className="bg-blue-50 dark:bg-zinc-800 text-blue-600 dark:text-blue-400 text-xs p-3 rounded-lg flex gap-2 items-start"><Activity className="w-4 h-4 mt-0.5 shrink-0" /><p>AI considers your last 5 workouts.</p></div>
+              <div className="bg-blue-50 dark:bg-zinc-800 text-blue-600 dark:text-blue-400 text-xs p-3 rounded-lg flex gap-2 items-start"><Activity className="w-4 h-4 mt-0.5 shrink-0" /><p>AI considers your last 10 workouts.</p></div>
               <textarea className="w-full border border-gray-200 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white rounded-xl p-3 text-sm focus:ring-2 focus:ring-purple-500 outline-none resize-none h-24" placeholder="Goal (e.g. Chest & Triceps)" value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} />
               <button onClick={handleAIGenerate} disabled={isGenerating || !aiPrompt.trim()} className="w-full bg-purple-600 text-white py-3 rounded-xl font-semibold hover:bg-purple-700 disabled:opacity-50 flex justify-center items-center gap-2">{isGenerating ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />} {isGenerating ? "Designing..." : "Generate"}</button>
             </div>
@@ -757,6 +758,35 @@ function WorkoutHistory({ user, workouts }) {
   }
   const toggleExpand = (id) => setExpandedId(expandedId === id ? null : id);
 
+  const handleExport = () => {
+    if (workouts.length === 0) return;
+    try {
+      // Create a clean version of the data for export
+      const exportData = workouts.map(w => ({
+        ...w,
+        date: w.date.toISOString(), // Ensure date is stringified standardly
+        exercises: w.exercises.map(e => ({
+          ...e,
+          sets: e.sets.map(s => ({ kg: Number(s.kg), reps: Number(s.reps), completed: s.completed }))
+        }))
+      }));
+
+      const dataStr = JSON.stringify(exportData, null, 2);
+      const blob = new Blob([dataStr], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.download = `ironlog_backup_${new Date().toISOString().split('T')[0]}.json`;
+      link.href = url;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("Export failed", e);
+      alert("Failed to export data.");
+    }
+  };
+
   const handleGenerateSummary = async () => {
     if (workouts.length < 3) {
       alert("Log at least 3 workouts to get a meaningful analysis.");
@@ -801,7 +831,18 @@ function WorkoutHistory({ user, workouts }) {
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex justify-between items-center">
         <h3 className="font-bold text-lg text-gray-900 dark:text-white">Workout History</h3>
-        <span className="text-xs text-gray-500 dark:text-zinc-500 bg-gray-100 dark:bg-zinc-800 px-2 py-1 rounded-full">{workouts.length} sessions</span>
+        <div className="flex items-center gap-3">
+          {workouts.length > 0 && (
+            <button 
+              onClick={handleExport}
+              className="p-1.5 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-100 dark:hover:bg-zinc-800 rounded-lg transition-all"
+              title="Download Data (JSON)"
+            >
+              <Download className="w-5 h-5" />
+            </button>
+          )}
+          <span className="text-xs text-gray-500 dark:text-zinc-500 bg-gray-100 dark:bg-zinc-800 px-2 py-1 rounded-full">{workouts.length} sessions</span>
+        </div>
       </div>
 
       {/* AI Analysis Section */}
