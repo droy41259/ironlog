@@ -30,9 +30,8 @@ import {
 
 // --- CONFIGURATION SECTION ---
 
-// 1. API KEY:
-// This key is used for your Vercel deployment.
-const apiKey = "AIzaSyCtHCMX8ppgUEc5HTcT6jPI_MPh-0bplkM"; 
+// 1. API KEY: REMOVED
+// We no longer need the API key here because the backend handles it!
 
 // 2. FIREBASE CONFIG:
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'ironlog-default';
@@ -54,26 +53,15 @@ const db = getFirestore(app);
 // --- Helper Functions ---
 
 async function callGemini(prompt, systemInstruction = "You are a helpful assistant.") {
-  // 1. Check if key exists
-  if (!apiKey || apiKey.trim() === "") {
-    alert("CRITICAL ERROR: API Key is missing! Please add your key to the 'apiKey' variable in App.jsx.");
-    throw new Error("API Key is missing");
-  }
-
-  // 2. Use the PUBLIC model name.
-  // The previous code used "-preview-09-2025" which is internal-only and rejects public keys.
-  // We switch to the standard "gemini-2.5-flash" which works with your API key.
-  const model = "gemini-2.5-flash"; 
-  
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  // UPDATED: Call our own Vercel Backend instead of Google directly
+  const url = '/api/gemini'; 
   
   const payload = {
-    contents: [{ parts: [{ text: prompt }] }],
-    systemInstruction: { parts: [{ text: systemInstruction }] },
-    generationConfig: { responseMimeType: "application/json" }
+    prompt: prompt,
+    systemInstruction: systemInstruction
   };
 
-  const maxRetries = 3;
+  const maxRetries = 2;
   let attempt = 0;
   
   while (attempt < maxRetries) {
@@ -84,20 +72,25 @@ async function callGemini(prompt, systemInstruction = "You are a helpful assista
         body: JSON.stringify(payload)
       });
       
+      // Parse the response from OUR backend
+      const data = await response.json();
+
       if (!response.ok) {
-        const errText = await response.text();
-        console.error(`Gemini API Error (${response.status}):`, errText);
-        throw new Error(`HTTP error! status: ${response.status}`);
+        // If 404, it means the /api/gemini route is missing (e.g., running locally without 'vercel dev')
+        if (response.status === 404) {
+          throw new Error("Backend API not found. Please deploy to Vercel to use AI features.");
+        }
+        throw new Error(data.error || `HTTP error! status: ${response.status}`);
       }
       
-      const data = await response.json();
+      // Extract the text from the Gemini response structure
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
       return JSON.parse(text);
     } catch (e) {
+      console.error("AI Call Failed:", e);
       attempt++;
-      console.warn(`Attempt ${attempt} failed. Retrying...`);
       if (attempt >= maxRetries) throw e;
-      await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+      await new Promise(r => setTimeout(r, 1000));
     }
   }
 }
@@ -461,8 +454,7 @@ function Dashboard({ workouts, setActiveTab, onRepeat, user }) {
       const result = await callGemini(prompt, "You are an elite fitness coach.");
       setCoachTip(result?.tip || "Keep pushing!");
     } catch (e) {
-      // Error is already logged in callGemini
-      // We just set default text here so the UI doesn't break
+      console.error(e);
       setCoachTip("Consistency is key! Keep pushing your limits.");
     } finally {
       setLoadingTip(false);
@@ -593,9 +585,8 @@ function WorkoutLogger({ user, workouts = [], initialData = null, onSave }) {
         setAiPrompt('');
       }
     } catch (e) {
-      // Error logging handled in callGemini mostly, but we log here too
-      // We suppress the alert here if it was already alerted in callGemini
-      console.error("AI Gen Error caught in handler", e);
+      console.error("AI Gen Error", e);
+      alert("Failed to generate workout. Check API Key.");
     } finally {
       setIsGenerating(false);
     }
