@@ -3,7 +3,8 @@ import {
   Plus, Trash2, Save, History, Dumbbell, Calendar, Settings2, 
   TrendingUp, CheckCircle2, Circle, Activity, Home, Trophy, 
   Zap, Sparkles, Loader2, X, ChevronDown, ChevronUp, Repeat, 
-  BarChart3, Layers, MessageSquareQuote, Moon, Sun, LogOut, Mail, Lock, User, AlertCircle, Download, Link, Unlink
+  BarChart3, Layers, MessageSquareQuote, Moon, Sun, LogOut, Mail, 
+  Lock, User, AlertCircle, Download, Link, Unlink, Play, Clock, ArrowRight
 } from 'lucide-react';
 
 // npm install firebase
@@ -119,35 +120,119 @@ const groupExercises = (exercises) => {
   return groups;
 };
 
+// Helper to format "X days ago"
+const getDaysAgo = (date) => {
+  const diffTime = Math.abs(new Date() - date);
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  return `${diffDays}d ago`;
+};
 
-// --- Chart Component ---
-const MiniChart = ({ data, color = "#3b82f6", height = 60 }) => {
-  if (!data || data.length < 2) return <div className="text-xs text-gray-400 dark:text-zinc-500 italic flex items-center justify-center h-full">Log more workouts to see trends</div>;
+
+// --- Improved Interactive Chart Component ---
+const MiniChart = ({ data, color = "#3b82f6", height = 200 }) => {
+  const [hoveredIndex, setHoveredIndex] = useState(null);
+
+  // Fallback for empty state
+  if (!data || data.length < 2) return (
+    <div className="flex flex-col items-center justify-center h-48 bg-gray-50 dark:bg-zinc-800/50 rounded-xl border border-dashed border-gray-200 dark:border-zinc-700 text-gray-400 dark:text-zinc-500">
+      <BarChart3 className="w-8 h-8 opacity-20 mb-2" />
+      <span className="text-xs italic">Log more workouts to see trends</span>
+    </div>
+  );
   
-  const width = 300;
+  const padding = 5;
+  
+  // Determine scaling
   const maxVal = Math.max(...data.map(d => d.val));
   const minVal = Math.min(...data.map(d => d.val));
   const range = maxVal - minVal || 1;
   
-  const points = data.map((d, i) => {
-    const x = (i / (data.length - 1)) * width;
-    const y = height - ((d.val - minVal) / range) * (height - 10) - 5;
-    return `${x},${y}`;
-  }).join(' ');
+  const getX = (i) => (i / (data.length - 1)) * (100 - padding * 2) + padding;
+  
+  // Invert Y because SVG 0 is top. Scale values to fit within 5-95% of height
+  const getY = (val) => {
+    if (range === 0) return 50;
+    return 100 - padding - ((val - minVal) / range) * (100 - padding * 2);
+  };
+
+  const points = data.map((d, i) => `${getX(i)},${getY(d.val)}`).join(' ');
+  const areaPoints = `${padding},100 ${points} ${100-padding},100`;
 
   return (
-    <div className="w-full h-full">
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible">
-        <defs>
-          <linearGradient id="gradient" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity="0.2" />
-            <stop offset="100%" stopColor={color} stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <polygon fill="url(#gradient)" points={`0,${height} ${points} ${width},${height}`} />
-        <polyline fill="none" stroke={color} strokeWidth="3" points={points} strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx={width} cy={height - ((data[data.length-1].val - minVal) / range) * (height - 10) - 5} r="4" fill={color} stroke="white" strokeWidth="2" />
-      </svg>
+    <div className="w-full relative group select-none" onMouseLeave={() => setHoveredIndex(null)}>
+      {/* Tooltip */}
+      {hoveredIndex !== null && (
+        <div 
+          className="absolute z-10 top-0 left-0 pointer-events-none transition-all duration-75 ease-out"
+          style={{ 
+            left: `${getX(hoveredIndex)}%`, 
+            top: `${getY(data[hoveredIndex].val)}%`,
+            transform: 'translate(-50%, -130%)'
+          }}
+        >
+          <div className="bg-gray-900 dark:bg-white text-white dark:text-gray-900 text-[10px] py-1.5 px-3 rounded-lg shadow-xl flex flex-col items-center whitespace-nowrap animate-in zoom-in-95 duration-100">
+             <span className="font-bold text-xs">{data[hoveredIndex].val.toLocaleString()} {data[hoveredIndex].unit}</span>
+             <span className="text-gray-400 dark:text-gray-500 font-medium text-[9px] mt-0.5">{data[hoveredIndex].label}</span>
+             {/* Arrow */}
+             <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-[1px] border-4 border-transparent border-t-gray-900 dark:border-t-white"></div>
+          </div>
+        </div>
+      )}
+
+      {/* Main SVG */}
+      <div className="h-48 w-full">
+        <svg viewBox="0 0 100 100" className="w-full h-full overflow-visible" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id={`gradient-${color}`} x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity="0.3" />
+              <stop offset="100%" stopColor={color} stopOpacity="0" />
+            </linearGradient>
+          </defs>
+
+          {/* Grid Lines (Horizontal) */}
+          {[20, 40, 60, 80].map(p => (
+            <line key={p} x1="0" y1={p} x2="100" y2={p} stroke="currentColor" className="text-gray-100 dark:text-zinc-800" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
+          ))}
+
+          {/* Area Fill */}
+          <polygon points={areaPoints} fill={`url(#gradient-${color})`} className="transition-all duration-300" />
+          
+          {/* Main Line */}
+          <polyline points={points} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" className="transition-all duration-300 drop-shadow-sm" />
+          
+          {/* Interactive Points */}
+          {data.map((d, i) => (
+            <g key={i} onMouseEnter={() => setHoveredIndex(i)} className="cursor-pointer">
+              {/* Invisible large hit area for easier hovering */}
+              <circle cx={getX(i)} cy={getY(d.val)} r="6" fill="transparent" /> 
+              
+              {/* Visible point */}
+              <circle 
+                cx={getX(i)} 
+                cy={getY(d.val)} 
+                r={hoveredIndex === i ? 3 : 1.5} 
+                fill={color} 
+                stroke="white" 
+                strokeWidth={hoveredIndex === i ? 1 : 0}
+                className={`transition-all duration-200 ${hoveredIndex === i ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} 
+                vectorEffect="non-scaling-stroke"
+              />
+              {/* Halo effect on active point */}
+               {hoveredIndex === i && (
+                  <circle cx={getX(i)} cy={getY(d.val)} r="6" fill={color} opacity="0.2" vectorEffect="non-scaling-stroke" />
+               )}
+            </g>
+          ))}
+        </svg>
+      </div>
+      
+      {/* X Axis Labels */}
+      <div className="flex justify-between text-[10px] text-gray-400 dark:text-zinc-600 mt-2 px-1 font-medium">
+        <span>{data[0].label}</span>
+        <span>{data[data.length - 1].label}</span>
+      </div>
     </div>
   );
 };
@@ -426,6 +511,28 @@ function Dashboard({ workouts, setActiveTab, onRepeat, user }) {
   const [loadingTip, setLoadingTip] = useState(false);
   const [chartMetric, setChartMetric] = useState('volume');
 
+  // Compute unique routines for "Quick Start" section
+  const quickStartRoutines = useMemo(() => {
+    const unique = [];
+    const names = new Set();
+    
+    // Iterate through workouts (assuming they are sorted by date desc)
+    // and pick the first occurrence of each unique name (the latest one)
+    workouts.forEach(w => {
+      const normalizedName = w.name.trim();
+      // Skip empty names or generic "New Workout" if you have those
+      if (!normalizedName) return;
+
+      if (!names.has(normalizedName)) {
+        names.add(normalizedName);
+        unique.push(w);
+      }
+    });
+    
+    // Return top 4 unique routines
+    return unique.slice(0, 4);
+  }, [workouts]);
+
   const personalRecords = useMemo(() => {
     const records = {};
     workouts.forEach(workout => {
@@ -457,11 +564,28 @@ function Dashboard({ workouts, setActiveTab, onRepeat, user }) {
   }, [workouts]);
 
   const chartData = useMemo(() => {
-    return workouts.slice().sort((a, b) => a.date - b.date).map(w => {
-      if (chartMetric === 'volume') return { val: w.totalVolume || 0 };
+    // Sort ascending by date for the chart
+    const sorted = workouts.slice().sort((a, b) => a.date - b.date);
+    const recent = sorted.slice(-7);
+
+    return recent.map(w => {
+      const dateLabel = w.date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      
+      if (chartMetric === 'volume') {
+         return { 
+           val: w.totalVolume || 0, 
+           label: dateLabel, 
+           unit: 'kg' 
+         };
+      }
+      
       const totalSets = w.exercises?.reduce((acc, ex) => acc + (ex.sets?.length || 0), 0) || 0;
-      return { val: totalSets };
-    }).slice(-7);
+      return { 
+        val: totalSets, 
+        label: dateLabel, 
+        unit: 'sets' 
+      };
+    });
   }, [workouts, chartMetric]);
 
   const weeklyProgress = useMemo(() => {
@@ -474,7 +598,6 @@ function Dashboard({ workouts, setActiveTab, onRepeat, user }) {
   }, [workouts]);
 
   const totalWorkouts = workouts.length;
-  const latestWorkout = workouts[0];
 
   const getCoachInsight = async () => {
     setLoadingTip(true);
@@ -487,7 +610,6 @@ function Dashboard({ workouts, setActiveTab, onRepeat, user }) {
       }));
       const prompt = `Analyze these recent workouts: ${JSON.stringify(recentHistory)}. Give me one short, specific, and motivating insight or tip (under 30 words) for my next session. Return valid JSON: { "tip": "string" }`;
       
-      // CALLS BACKEND API NOW
       const result = await callGemini(prompt, "You are an elite fitness coach.");
       setCoachTip(result?.tip || "Keep pushing!");
     } catch (e) {
@@ -528,27 +650,49 @@ function Dashboard({ workouts, setActiveTab, onRepeat, user }) {
       </div>
 
       <div className="bg-white dark:bg-zinc-900 rounded-2xl p-5 border border-gray-100 dark:border-zinc-800 shadow-sm">
-        <div className="flex justify-between items-start mb-4">
-          <div><h2 className="font-bold text-gray-800 dark:text-white flex items-center gap-2"><Activity className="w-5 h-5 text-blue-500" /> {chartMetric === 'volume' ? 'Volume Load' : 'Training Frequency'}</h2><p className="text-gray-400 dark:text-zinc-500 text-xs">{chartMetric === 'volume' ? 'Total kg' : 'Total sets'} (Last 7)</p></div>
+        <div className="flex justify-between items-start mb-6">
+          <div><h2 className="font-bold text-gray-800 dark:text-white flex items-center gap-2"><Activity className="w-5 h-5 text-blue-500" /> {chartMetric === 'volume' ? 'Volume Load' : 'Training Frequency'}</h2><p className="text-gray-400 dark:text-zinc-500 text-xs">{chartMetric === 'volume' ? 'Total kg lifted' : 'Total sets performed'} (Last 7 Sessions)</p></div>
           <div className="flex bg-gray-100 dark:bg-zinc-800 p-1 rounded-lg">
-            <button onClick={() => setChartMetric('volume')} className={`p-1.5 rounded-md transition-all ${chartMetric === 'volume' ? 'bg-white dark:bg-zinc-700 shadow text-blue-600 dark:text-white' : 'text-gray-400 dark:text-zinc-500 hover:text-gray-600'}`}><BarChart3 className="w-4 h-4" /></button>
-            <button onClick={() => setChartMetric('sets')} className={`p-1.5 rounded-md transition-all ${chartMetric === 'sets' ? 'bg-white dark:bg-zinc-700 shadow text-blue-600 dark:text-white' : 'text-gray-400 dark:text-zinc-500 hover:text-gray-600'}`}><Layers className="w-4 h-4" /></button>
+            <button onClick={() => setChartMetric('volume')} className={`p-1.5 rounded-md transition-all ${chartMetric === 'volume' ? 'bg-white dark:bg-zinc-700 shadow text-blue-600 dark:text-white' : 'text-gray-400 dark:text-zinc-500 hover:text-gray-600'}`} title="Volume (kg)"><BarChart3 className="w-4 h-4" /></button>
+            <button onClick={() => setChartMetric('sets')} className={`p-1.5 rounded-md transition-all ${chartMetric === 'sets' ? 'bg-white dark:bg-zinc-700 shadow text-blue-600 dark:text-white' : 'text-gray-400 dark:text-zinc-500 hover:text-gray-600'}`} title="Sets"><Layers className="w-4 h-4" /></button>
           </div>
         </div>
-        <div className="h-32 w-full"><MiniChart data={chartData} height={80} color={chartMetric === 'volume' ? '#3b82f6' : '#8b5cf6'} /></div>
+        <div className="w-full"><MiniChart data={chartData} color={chartMetric === 'volume' ? '#3b82f6' : '#8b5cf6'} /></div>
       </div>
 
-      {latestWorkout && (
-        <div className="grid grid-cols-1 gap-3">
-           <button onClick={() => onRepeat(latestWorkout)} className="bg-white dark:bg-zinc-900 border border-gray-100 dark:border-zinc-800 shadow-sm p-4 rounded-xl flex items-center justify-between hover:bg-gray-50 dark:hover:bg-zinc-800 transition-colors group">
-             <div className="flex items-center gap-3">
-               <div className="bg-green-100 dark:bg-green-900/30 p-2 rounded-lg text-green-600 dark:text-green-400 group-hover:bg-green-200 dark:group-hover:bg-green-900/50 transition-colors"><Repeat className="w-5 h-5" /></div>
-               <div className="text-left"><div className="font-bold text-gray-900 dark:text-white text-sm">Repeat Last Workout</div><div className="text-xs text-gray-500 dark:text-zinc-500">Do "{latestWorkout.name}" again</div></div>
-             </div>
-             <ChevronDown className="w-4 h-4 text-gray-300 dark:text-zinc-600 -rotate-90" />
-           </button>
-        </div>
-      )}
+      {/* QUICK START / ROUTINES SECTION */}
+      <div>
+        <h3 className="font-bold text-gray-800 dark:text-white flex items-center gap-2 mb-3">
+          <Play className="w-5 h-5 text-green-500 fill-current" /> Quick Start
+        </h3>
+        {quickStartRoutines.length > 0 ? (
+          <div className="grid grid-cols-2 gap-3">
+            {quickStartRoutines.map((routine) => (
+              <button 
+                key={routine.id} 
+                onClick={() => onRepeat(routine)} 
+                className="bg-white dark:bg-zinc-900 border border-gray-100 dark:border-zinc-800 shadow-sm p-4 rounded-xl flex flex-col items-start hover:bg-gray-50 dark:hover:bg-zinc-800 hover:border-blue-200 dark:hover:border-blue-900 transition-all group text-left relative overflow-hidden"
+              >
+                <div className="absolute right-3 top-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <ArrowRight className="w-4 h-4 text-blue-500" />
+                </div>
+                <div className="font-bold text-gray-900 dark:text-white text-sm line-clamp-1 mb-1">{routine.name}</div>
+                <div className="text-xs text-gray-500 dark:text-zinc-500 flex items-center gap-1.5">
+                   <Clock className="w-3 h-3" /> {getDaysAgo(routine.date)}
+                </div>
+                <div className="mt-2 text-[10px] text-gray-400 dark:text-zinc-600 bg-gray-50 dark:bg-zinc-800 px-1.5 py-0.5 rounded">
+                  {routine.exercises?.length || 0} Exercises
+                </div>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center p-6 bg-gray-50 dark:bg-zinc-900 border-2 border-dashed border-gray-200 dark:border-zinc-800 rounded-xl">
+             <p className="text-sm text-gray-500 dark:text-zinc-500 mb-2">No routines found yet.</p>
+             <button onClick={() => setActiveTab('log')} className="text-blue-600 dark:text-blue-400 text-sm font-bold hover:underline">Log a workout to build your library</button>
+          </div>
+        )}
+      </div>
 
       {totalWorkouts === 0 && (
         <button onClick={() => setActiveTab('log')} className="w-full py-4 bg-white dark:bg-zinc-900 border-2 border-dashed border-blue-200 dark:border-zinc-700 rounded-xl flex flex-col items-center justify-center gap-2 text-blue-500 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-zinc-800 transition-colors"><Plus className="w-8 h-8" /><span className="font-medium">Log your first workout</span></button>
