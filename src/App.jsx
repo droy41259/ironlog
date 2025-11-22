@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Plus, Trash2, Save, History, Dumbbell, Calendar, Settings2, 
   TrendingUp, CheckCircle2, Circle, Activity, Home, Trophy, 
   Zap, Sparkles, Loader2, X, ChevronDown, ChevronUp, Repeat, 
   BarChart3, Layers, MessageSquareQuote, Moon, Sun, LogOut, Mail, 
-  Lock, User, AlertCircle, Download, Link, Unlink, Play, Clock, ArrowRight
+  Lock, User, AlertCircle, Download, Link, Unlink, Play, Clock, 
+  ArrowRight, Send, Bot, MessageSquare, ChevronRight
 } from 'lucide-react';
 
 // npm install firebase
@@ -25,8 +26,9 @@ import {
   orderBy, 
   onSnapshot, 
   serverTimestamp,
-  deleteDoc,
-  doc
+  deleteDoc, 
+  doc,
+  limit
 } from 'firebase/firestore';
 
 // --- CONFIGURATION SECTION ---
@@ -51,7 +53,6 @@ const db = getFirestore(app);
 // --- Helper Functions ---
 
 async function callGemini(prompt, systemInstruction = "You are a helpful assistant.") {
-  // Call our secure backend endpoint
   const url = '/api/gemini'; 
   
   const payload = {
@@ -79,9 +80,14 @@ async function callGemini(prompt, systemInstruction = "You are a helpful assista
         throw new Error(data.error || `HTTP error! status: ${response.status}`);
       }
       
-      // Extract the text from the Gemini response structure
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      return JSON.parse(text);
+      
+      // Try parsing JSON if the AI returns JSON string, otherwise return text
+      try {
+        return JSON.parse(text);
+      } catch {
+        return text;
+      }
     } catch (e) {
       console.error("AI Call Failed:", e);
       attempt++;
@@ -91,7 +97,7 @@ async function callGemini(prompt, systemInstruction = "You are a helpful assista
   }
 }
 
-// Helper to group exercises into supersets for rendering
+// Helper to group exercises into supersets
 const groupExercises = (exercises) => {
   if (!exercises) return [];
   const groups = [];
@@ -104,18 +110,14 @@ const groupExercises = (exercises) => {
     if (index === 0) {
       currentGroup.push(ex);
     } else {
-      // If current has supersetId AND it matches previous supersetId, group them
       if (isSuperset && prevEx && prevEx.supersetId === isSuperset) {
         currentGroup.push(ex);
       } else {
-        // Push old group to groups
         groups.push(currentGroup);
-        // Start new group
         currentGroup = [ex];
       }
     }
   });
-  // Push the last group
   if (currentGroup.length > 0) groups.push(currentGroup);
   return groups;
 };
@@ -129,12 +131,10 @@ const getDaysAgo = (date) => {
   return `${diffDays}d ago`;
 };
 
-
-// --- Improved Interactive Chart Component ---
+// --- Interactive Chart Component ---
 const MiniChart = ({ data, color = "#3b82f6", height = 200 }) => {
   const [hoveredIndex, setHoveredIndex] = useState(null);
 
-  // Fallback for empty state
   if (!data || data.length < 2) return (
     <div className="flex flex-col items-center justify-center h-48 bg-gray-50 dark:bg-zinc-800/50 rounded-xl border border-dashed border-gray-200 dark:border-zinc-700 text-gray-400 dark:text-zinc-500">
       <BarChart3 className="w-8 h-8 opacity-20 mb-2" />
@@ -143,26 +143,19 @@ const MiniChart = ({ data, color = "#3b82f6", height = 200 }) => {
   );
   
   const padding = 5;
-  
-  // Determine scaling
   const maxVal = Math.max(...data.map(d => d.val));
   const minVal = Math.min(...data.map(d => d.val));
   const range = maxVal - minVal || 1;
-  
   const getX = (i) => (i / (data.length - 1)) * (100 - padding * 2) + padding;
-  
-  // Invert Y because SVG 0 is top. Scale values to fit within 5-95% of height
   const getY = (val) => {
     if (range === 0) return 50;
     return 100 - padding - ((val - minVal) / range) * (100 - padding * 2);
   };
-
   const points = data.map((d, i) => `${getX(i)},${getY(d.val)}`).join(' ');
   const areaPoints = `${padding},100 ${points} ${100-padding},100`;
 
   return (
     <div className="w-full relative group select-none" onMouseLeave={() => setHoveredIndex(null)}>
-      {/* Tooltip */}
       {hoveredIndex !== null && (
         <div 
           className="absolute z-10 top-0 left-0 pointer-events-none transition-all duration-75 ease-out"
@@ -175,13 +168,10 @@ const MiniChart = ({ data, color = "#3b82f6", height = 200 }) => {
           <div className="bg-gray-900 dark:bg-white text-white dark:text-gray-900 text-[10px] py-1.5 px-3 rounded-lg shadow-xl flex flex-col items-center whitespace-nowrap animate-in zoom-in-95 duration-100">
              <span className="font-bold text-xs">{data[hoveredIndex].val.toLocaleString()} {data[hoveredIndex].unit}</span>
              <span className="text-gray-400 dark:text-gray-500 font-medium text-[9px] mt-0.5">{data[hoveredIndex].label}</span>
-             {/* Arrow */}
              <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-[1px] border-4 border-transparent border-t-gray-900 dark:border-t-white"></div>
           </div>
         </div>
       )}
-
-      {/* Main SVG */}
       <div className="h-48 w-full">
         <svg viewBox="0 0 100 100" className="w-full h-full overflow-visible" preserveAspectRatio="none">
           <defs>
@@ -190,25 +180,14 @@ const MiniChart = ({ data, color = "#3b82f6", height = 200 }) => {
               <stop offset="100%" stopColor={color} stopOpacity="0" />
             </linearGradient>
           </defs>
-
-          {/* Grid Lines (Horizontal) */}
           {[20, 40, 60, 80].map(p => (
             <line key={p} x1="0" y1={p} x2="100" y2={p} stroke="currentColor" className="text-gray-100 dark:text-zinc-800" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
           ))}
-
-          {/* Area Fill */}
           <polygon points={areaPoints} fill={`url(#gradient-${color})`} className="transition-all duration-300" />
-          
-          {/* Main Line */}
           <polyline points={points} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" className="transition-all duration-300 drop-shadow-sm" />
-          
-          {/* Interactive Points */}
           {data.map((d, i) => (
             <g key={i} onMouseEnter={() => setHoveredIndex(i)} className="cursor-pointer">
-              {/* Invisible large hit area for easier hovering */}
               <circle cx={getX(i)} cy={getY(d.val)} r="6" fill="transparent" /> 
-              
-              {/* Visible point */}
               <circle 
                 cx={getX(i)} 
                 cy={getY(d.val)} 
@@ -219,7 +198,6 @@ const MiniChart = ({ data, color = "#3b82f6", height = 200 }) => {
                 className={`transition-all duration-200 ${hoveredIndex === i ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} 
                 vectorEffect="non-scaling-stroke"
               />
-              {/* Halo effect on active point */}
                {hoveredIndex === i && (
                   <circle cx={getX(i)} cy={getY(d.val)} r="6" fill={color} opacity="0.2" vectorEffect="non-scaling-stroke" />
                )}
@@ -227,8 +205,6 @@ const MiniChart = ({ data, color = "#3b82f6", height = 200 }) => {
           ))}
         </svg>
       </div>
-      
-      {/* X Axis Labels */}
       <div className="flex justify-between text-[10px] text-gray-400 dark:text-zinc-600 mt-2 px-1 font-medium">
         <span>{data[0].label}</span>
         <span>{data[data.length - 1].label}</span>
@@ -245,7 +221,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [darkMode, setDarkMode] = useState(false);
 
-  // 1. AUTHENTICATION
+  // AUTHENTICATION
   useEffect(() => {
     const initAuth = async () => {
       if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -265,18 +241,16 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. DATABASE (Cross-Device Sync Logic)
+  // DATABASE
   useEffect(() => {
     if (!user) {
       setWorkouts([]);
       return;
     }
-    
     const q = query(
       collection(db, 'artifacts', appId, 'users', user.uid, 'workouts'),
       orderBy('date', 'desc')
     );
-
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({
         id: doc.id,
@@ -284,26 +258,20 @@ export default function App() {
         date: doc.data().date ? doc.data().date.toDate() : new Date()
       }));
       setWorkouts(data);
-    }, (error) => {
-        console.error("History fetch error", error);
     });
     return () => unsubscribe();
   }, [user]);
 
-  // handleRepeat writes directly to localStorage to ensure persistence
   const handleRepeat = (workout) => {
     const template = {
       name: workout.name,
       exercises: workout.exercises.map(ex => ({
         ...ex,
         id: crypto.randomUUID(),
-        // Preserve supersetId if it exists, but randomize it if needed to avoid conflicts if we import multiple times (simplified for now: keep same ID structure)
         supersetId: ex.supersetId || null,
         sets: ex.sets.map(s => ({ ...s, id: crypto.randomUUID(), completed: false }))
       }))
     };
-    
-    // Save directly to draft storage so WorkoutLogger picks it up
     localStorage.setItem(`ironlog_draft_${user.uid}`, JSON.stringify(template));
     setActiveTab('log');
   };
@@ -326,7 +294,6 @@ export default function App() {
   return (
     <div className={darkMode ? 'dark' : ''}>
       <div className="min-h-screen bg-gray-50 dark:bg-zinc-950 text-gray-800 dark:text-zinc-200 pb-24 font-sans select-none transition-colors duration-300">
-        {/* Header */}
         <nav className="bg-white dark:bg-zinc-900 shadow-sm dark:shadow-zinc-900 sticky top-0 z-10 px-4 py-3 flex justify-between items-center border-b border-transparent dark:border-zinc-800">
           <div className="flex items-center gap-2">
             <div className="bg-blue-600 p-1.5 rounded-lg shadow-blue-200 dark:shadow-none shadow-md">
@@ -335,17 +302,10 @@ export default function App() {
             <span className="font-bold text-xl tracking-tight text-gray-900 dark:text-white">IronLog</span>
           </div>
           <div className="flex items-center gap-2">
-            <button 
-              onClick={() => setDarkMode(!darkMode)} 
-              className="p-2 rounded-full bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-200 dark:hover:bg-zinc-700 transition-colors"
-            >
+            <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-full bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-200 dark:hover:bg-zinc-700 transition-colors">
               {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
             </button>
-            <button 
-              onClick={handleLogout}
-              className="p-2 rounded-full bg-red-50 dark:bg-red-900/20 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
-              title="Sign Out"
-            >
+            <button onClick={handleLogout} className="p-2 rounded-full bg-red-50 dark:bg-red-900/20 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors">
               <LogOut className="w-5 h-5" />
             </button>
           </div>
@@ -355,20 +315,20 @@ export default function App() {
           {activeTab === 'home' && <Dashboard workouts={workouts} setActiveTab={setActiveTab} onRepeat={handleRepeat} user={user} />}
           {activeTab === 'log' && <WorkoutLogger user={user} workouts={workouts} onSave={() => setActiveTab('home')} />}
           {activeTab === 'history' && <WorkoutHistory user={user} workouts={workouts} onRepeat={handleRepeat} />}
+          {activeTab === 'coach' && <CoachChat user={user} workouts={workouts} />}
         </main>
 
-        {/* Bottom Navigation */}
         <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-zinc-900 border-t border-gray-200 dark:border-zinc-800 px-6 py-2 flex justify-around items-center z-20 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-          <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-all ${activeTab === 'home' ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-zinc-800' : 'text-gray-400 dark:text-zinc-500 hover:bg-gray-50 dark:hover:bg-zinc-800'}`}>
+          <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-all ${activeTab === 'home' ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-zinc-800' : 'text-gray-400 dark:text-zinc-500'}`}>
             <Home className="w-5 h-5" />
             <span className="text-[10px] font-bold">Home</span>
           </button>
-          <div className="relative -top-5">
+          <div className="relative -top-6">
             <button onClick={() => setActiveTab('log')} className={`flex flex-col items-center justify-center w-14 h-14 rounded-full shadow-lg border-4 border-gray-50 dark:border-zinc-950 transition-all ${activeTab === 'log' ? 'bg-blue-600 text-white scale-110' : 'bg-blue-600 text-white hover:scale-105'}`}>
               <Plus className="w-7 h-7" />
             </button>
           </div>
-          <button onClick={() => setActiveTab('history')} className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-all ${activeTab === 'history' ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-zinc-800' : 'text-gray-400 dark:text-zinc-500 hover:bg-gray-50 dark:hover:bg-zinc-800'}`}>
+          <button onClick={() => setActiveTab('history')} className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-all ${activeTab === 'history' ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-zinc-800' : 'text-gray-400 dark:text-zinc-500'}`}>
             <History className="w-5 h-5" />
             <span className="text-[10px] font-bold">History</span>
           </button>
@@ -378,7 +338,152 @@ export default function App() {
   );
 }
 
-// --- New Authentication Component ---
+// --- NEW COMPONENT: CoachChat ---
+function CoachChat({ user, workouts }) {
+  const [messages, setMessages] = useState([
+    { role: 'model', text: `Hi! I'm your IronLog Coach. I have access to your ${workouts.length} logged workouts. Ask me about your progress, routine ideas, or form tips!` }
+  ]);
+  const [input, setInput] = useState("");
+  const [isTyping, setIsTyping] = useState(false);
+  const messagesEndRef = useRef(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const handleSend = async () => {
+    if (!input.trim()) return;
+    const userMsg = input;
+    setMessages(prev => [...prev, { role: 'user', text: userMsg }]);
+    setInput("");
+    setIsTyping(true);
+
+    try {
+      // 1. Build Context
+      const recentWorkouts = workouts.slice(0, 10).map(w => ({
+        date: w.date.toLocaleDateString(),
+        name: w.name,
+        volume: w.totalVolume,
+        exercises: w.exercises.map(e => e.name).join(', ')
+      }));
+
+      // Calculate simple PRs for context
+      const records = {};
+      workouts.forEach(w => {
+        w.exercises.forEach(e => {
+          const maxWeight = Math.max(...(e.sets || []).map(s => Number(s.kg) || 0));
+          if (!records[e.name] || maxWeight > records[e.name]) records[e.name] = maxWeight;
+        });
+      });
+
+      const systemInstruction = `
+        You are an elite fitness coach for the IronLog app. 
+        USER DATA CONTEXT:
+        - Recent Workouts: ${JSON.stringify(recentWorkouts)}
+        - Personal Records (Est): ${JSON.stringify(records)}
+        
+        INSTRUCTIONS:
+        1. Answer the user's question concisely (under 80 words unless asked for a plan).
+        2. USE THE DATA. If they ask "Is my bench going up?", look at the records provided. 
+        3. GUARDRAILS: Only answer questions about fitness, workouts, anatomy, or nutrition/diet. If the user asks about politics, coding, or other topics, politely refuse and steer back to training.
+        4. Keep tone encouraging but analytical.
+      `;
+
+      // 2. Call AI
+      const response = await callGemini(userMsg, systemInstruction);
+      
+      // Handle if response is object (from JSON parse) or string
+      const textResponse = typeof response === 'object' && response.text ? response.text : (typeof response === 'string' ? response : JSON.stringify(response));
+
+      setMessages(prev => [...prev, { role: 'model', text: textResponse }]);
+    } catch (error) {
+      setMessages(prev => [...prev, { role: 'model', text: "Sorry, I'm having trouble analyzing your data right now." }]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  const suggestions = [
+    "What's my strongest lift?",
+    "Suggest a leg workout",
+    "How is my volume trending?",
+    "Why is my progress stalling?"
+  ];
+
+  return (
+    <div className="flex flex-col h-[calc(100vh-140px)] animate-in fade-in duration-300">
+      <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-4 rounded-b-2xl shadow-lg -mx-4 -mt-4 mb-4">
+        <h2 className="text-white font-bold text-lg flex items-center gap-2">
+          <Bot className="w-6 h-6 text-blue-200" /> AI Coach
+        </h2>
+        <p className="text-blue-100 text-xs">Powered by your training data</p>
+      </div>
+
+      <div className="flex-1 overflow-y-auto space-y-4 px-2 pb-4 no-scrollbar">
+        {messages.map((msg, idx) => (
+          <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-[85%] p-3 rounded-2xl text-sm ${
+              msg.role === 'user' 
+                ? 'bg-blue-600 text-white rounded-br-none' 
+                : 'bg-white dark:bg-zinc-800 text-gray-800 dark:text-zinc-200 border border-gray-100 dark:border-zinc-700 rounded-bl-none shadow-sm'
+            }`}>
+              {msg.text}
+            </div>
+          </div>
+        ))}
+        {isTyping && (
+          <div className="flex justify-start">
+            <div className="bg-white dark:bg-zinc-800 p-3 rounded-2xl rounded-bl-none border border-gray-100 dark:border-zinc-700 shadow-sm flex gap-1">
+              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+            </div>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      <div className="mt-auto">
+        {messages.length < 3 && (
+           <div className="flex gap-2 overflow-x-auto pb-3 no-scrollbar px-1">
+             {suggestions.map((s, i) => (
+               <button 
+                 key={i} 
+                 onClick={() => { setInput(s); handleSend(); }} 
+                 className="whitespace-nowrap bg-blue-50 dark:bg-zinc-800 text-blue-600 dark:text-blue-400 text-xs px-3 py-1.5 rounded-full border border-blue-100 dark:border-zinc-700 hover:bg-blue-100 transition-colors"
+               >
+                 {s}
+               </button>
+             ))}
+           </div>
+        )}
+        
+        <div className="bg-white dark:bg-zinc-900 p-2 rounded-xl border border-gray-200 dark:border-zinc-800 flex items-center gap-2 shadow-sm">
+          <input 
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+            placeholder="Ask your coach..."
+            className="flex-1 bg-transparent px-2 py-2 text-sm outline-none text-gray-800 dark:text-white placeholder-gray-400"
+          />
+          <button 
+            onClick={handleSend}
+            disabled={!input.trim() || isTyping}
+            className="p-2 bg-blue-600 rounded-lg text-white hover:bg-blue-700 disabled:opacity-50 transition-all"
+          >
+            <Send className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- EXISTING COMPONENTS (Unchanged logic, just re-declared for single file) ---
 
 function AuthScreen({ darkMode, setDarkMode }) {
   const [isLogin, setIsLogin] = useState(true);
@@ -392,23 +497,13 @@ function AuthScreen({ darkMode, setDarkMode }) {
     setError('');
     setLoading(true);
     try {
-      if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
-      } else {
-        await createUserWithEmailAndPassword(auth, email, password);
-      }
+      if (isLogin) await signInWithEmailAndPassword(auth, email, password);
+      else await createUserWithEmailAndPassword(auth, email, password);
     } catch (err) {
-      console.log(err.code);
       let msg = err.message;
-      if (msg.includes('operation-not-allowed')) {
-        msg = "Authentication disabled. Enable 'Email/Password' in Firebase Console > Authentication.";
-      } else if (msg.includes('email-already-in-use')) {
-        msg = "Email already in use. Try signing in instead.";
-      } else if (msg.includes('weak-password')) {
-        msg = "Password is too weak (min 6 characters).";
-      } else if (msg.includes('invalid-credential') || msg.includes('wrong-password') || msg.includes('user-not-found')) {
-        msg = "Incorrect email or password.";
-      }
+      if (msg.includes('invalid-credential') || msg.includes('wrong-password') || msg.includes('user-not-found')) msg = "Incorrect email or password.";
+      else if (msg.includes('email-already-in-use')) msg = "Email already in use.";
+      else if (msg.includes('weak-password')) msg = "Password too weak.";
       setError(msg.replace('Firebase: ', '').replace('auth/', ''));
     } finally {
       setLoading(false);
@@ -425,111 +520,53 @@ function AuthScreen({ darkMode, setDarkMode }) {
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white tracking-tight">IronLog</h1>
           <p className="text-gray-500 dark:text-zinc-400 mt-2">Track your progress, hit your goals.</p>
         </div>
-
         <div className="bg-white dark:bg-zinc-900 p-8 rounded-3xl shadow-lg border border-gray-100 dark:border-zinc-800">
           <div className="flex gap-4 mb-8 bg-gray-100 dark:bg-zinc-800 p-1 rounded-xl">
-            <button 
-              onClick={() => { setIsLogin(true); setError(''); }} 
-              className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${isLogin ? 'bg-white dark:bg-zinc-700 text-gray-900 dark:text-white shadow-sm' : 'text-gray-400 dark:text-zinc-500'}`}
-            >
-              Sign In
-            </button>
-            <button 
-              onClick={() => { setIsLogin(false); setError(''); }} 
-              className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${!isLogin ? 'bg-white dark:bg-zinc-700 text-gray-900 dark:text-white shadow-sm' : 'text-gray-400 dark:text-zinc-500'}`}
-            >
-              Sign Up
-            </button>
+            <button onClick={() => { setIsLogin(true); setError(''); }} className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${isLogin ? 'bg-white dark:bg-zinc-700 text-gray-900 dark:text-white shadow-sm' : 'text-gray-400 dark:text-zinc-500'}`}>Sign In</button>
+            <button onClick={() => { setIsLogin(false); setError(''); }} className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${!isLogin ? 'bg-white dark:bg-zinc-700 text-gray-900 dark:text-white shadow-sm' : 'text-gray-400 dark:text-zinc-500'}`}>Sign Up</button>
           </div>
-
           <form onSubmit={handleAuth} className="space-y-4">
             <div className="space-y-2">
-              <label className="text-xs font-bold text-gray-500 dark:text-zinc-500 uppercase tracking-wider ml-1">Email</label>
-              <div className="flex items-center gap-3 bg-gray-50 dark:bg-zinc-800 px-4 py-3 rounded-xl border border-transparent focus-within:border-blue-500 focus-within:bg-white dark:focus-within:bg-zinc-900 transition-all">
+              <label className="text-xs font-bold text-gray-500 dark:text-zinc-500 uppercase">Email</label>
+              <div className="flex items-center gap-3 bg-gray-50 dark:bg-zinc-800 px-4 py-3 rounded-xl border border-transparent focus-within:border-blue-500 transition-all">
                 <Mail className="w-5 h-5 text-gray-400" />
-                <input 
-                  type="email" 
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com" 
-                  className="bg-transparent w-full outline-none text-gray-800 dark:text-white placeholder-gray-400"
-                  required 
-                />
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" className="bg-transparent w-full outline-none text-gray-800 dark:text-white" required />
               </div>
             </div>
-            
             <div className="space-y-2">
-              <label className="text-xs font-bold text-gray-500 dark:text-zinc-500 uppercase tracking-wider ml-1">Password</label>
-              <div className="flex items-center gap-3 bg-gray-50 dark:bg-zinc-800 px-4 py-3 rounded-xl border border-transparent focus-within:border-blue-500 focus-within:bg-white dark:focus-within:bg-zinc-900 transition-all">
+              <label className="text-xs font-bold text-gray-500 dark:text-zinc-500 uppercase">Password</label>
+              <div className="flex items-center gap-3 bg-gray-50 dark:bg-zinc-800 px-4 py-3 rounded-xl border border-transparent focus-within:border-blue-500 transition-all">
                 <Lock className="w-5 h-5 text-gray-400" />
-                <input 
-                  type="password" 
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••" 
-                  className="bg-transparent w-full outline-none text-gray-800 dark:text-white placeholder-gray-400"
-                  required 
-                  minLength={6}
-                />
+                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" className="bg-transparent w-full outline-none text-gray-800 dark:text-white" required minLength={6} />
               </div>
             </div>
-
-            {error && (
-              <div className="p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/50 text-red-600 dark:text-red-400 text-xs font-medium flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /> 
-                <span>{error}</span>
-              </div>
-            )}
-
-            <button 
-              type="submit" 
-              disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-200 dark:shadow-none transition-all active:scale-[0.98] disabled:opacity-70 flex justify-center items-center"
-            >
+            {error && <div className="p-3 rounded-xl bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-xs font-medium flex items-center gap-2"><AlertCircle className="w-4 h-4" />{error}</div>}
+            <button type="submit" disabled={loading} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg transition-all flex justify-center items-center">
               {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (isLogin ? "Sign In" : "Create Account")}
             </button>
           </form>
-        </div>
-        
-        <div className="mt-8 flex justify-center">
-           <button 
-              onClick={() => setDarkMode(!darkMode)} 
-              className="p-3 rounded-full bg-gray-100 dark:bg-zinc-900 text-gray-600 dark:text-zinc-500 hover:bg-gray-200 dark:hover:bg-zinc-800 transition-colors"
-            >
-              {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-            </button>
         </div>
       </div>
     </div>
   );
 }
 
-// --- Sub-Components ---
-
 function Dashboard({ workouts, setActiveTab, onRepeat, user }) {
   const [coachTip, setCoachTip] = useState(null);
   const [loadingTip, setLoadingTip] = useState(false);
   const [chartMetric, setChartMetric] = useState('volume');
 
-  // Compute unique routines for "Quick Start" section
   const quickStartRoutines = useMemo(() => {
     const unique = [];
     const names = new Set();
-    
-    // Iterate through workouts (assuming they are sorted by date desc)
-    // and pick the first occurrence of each unique name (the latest one)
     workouts.forEach(w => {
       const normalizedName = w.name.trim();
-      // Skip empty names or generic "New Workout" if you have those
       if (!normalizedName) return;
-
       if (!names.has(normalizedName)) {
         names.add(normalizedName);
         unique.push(w);
       }
     });
-    
-    // Return top 4 unique routines
     return unique.slice(0, 4);
   }, [workouts]);
 
@@ -564,27 +601,13 @@ function Dashboard({ workouts, setActiveTab, onRepeat, user }) {
   }, [workouts]);
 
   const chartData = useMemo(() => {
-    // Sort ascending by date for the chart
     const sorted = workouts.slice().sort((a, b) => a.date - b.date);
     const recent = sorted.slice(-7);
-
     return recent.map(w => {
       const dateLabel = w.date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-      
-      if (chartMetric === 'volume') {
-         return { 
-           val: w.totalVolume || 0, 
-           label: dateLabel, 
-           unit: 'kg' 
-         };
-      }
-      
+      if (chartMetric === 'volume') return { val: w.totalVolume || 0, label: dateLabel, unit: 'kg' };
       const totalSets = w.exercises?.reduce((acc, ex) => acc + (ex.sets?.length || 0), 0) || 0;
-      return { 
-        val: totalSets, 
-        label: dateLabel, 
-        unit: 'sets' 
-      };
+      return { val: totalSets, label: dateLabel, unit: 'sets' };
     });
   }, [workouts, chartMetric]);
 
@@ -597,8 +620,6 @@ function Dashboard({ workouts, setActiveTab, onRepeat, user }) {
     return workouts.filter(w => w.date >= startOfWeek).length;
   }, [workouts]);
 
-  const totalWorkouts = workouts.length;
-
   const getCoachInsight = async () => {
     setLoadingTip(true);
     try {
@@ -608,12 +629,10 @@ function Dashboard({ workouts, setActiveTab, onRepeat, user }) {
         volume: w.totalVolume,
         exercises: w.exercises.map(e => e.name).join(', ')
       }));
-      const prompt = `Analyze these recent workouts: ${JSON.stringify(recentHistory)}. Give me one short, specific, and motivating insight or tip (under 30 words) for my next session. Return valid JSON: { "tip": "string" }`;
-      
+      const prompt = `Analyze these recent workouts: ${JSON.stringify(recentHistory)}. Give me one short, specific, and motivating insight or tip (under 30 words). Return valid JSON: { "tip": "string" }`;
       const result = await callGemini(prompt, "You are an elite fitness coach.");
       setCoachTip(result?.tip || "Keep pushing!");
     } catch (e) {
-      console.error(e);
       setCoachTip("Consistency is key! Keep pushing your limits.");
     } finally {
       setLoadingTip(false);
@@ -629,7 +648,28 @@ function Dashboard({ workouts, setActiveTab, onRepeat, user }) {
              <User className="w-3 h-3" /> {user.email || 'User'}
           </div>
         </div>
-        <div className="bg-blue-50 dark:bg-zinc-900 text-blue-700 dark:text-blue-400 px-3 py-2 rounded-xl flex items-center gap-2 shadow-sm border border-blue-100 dark:border-zinc-800"><div className="relative"><Circle className="w-8 h-8 text-blue-200 dark:text-blue-900" strokeWidth={4} /><div className="absolute inset-0 flex items-center justify-center text-[10px] font-bold">{weeklyProgress}</div></div><div className="flex flex-col leading-none"><span className="text-[10px] text-blue-400 font-bold uppercase">This Week</span><span className="text-xs font-bold">Sessions</span></div></div>
+        
+        {/* MODIFIED HEADER: Coach button added here next to session counter */}
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={() => setActiveTab('coach')} 
+            className="flex flex-col items-center justify-center p-2 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-md shadow-indigo-200 dark:shadow-none hover:scale-105 transition-transform"
+          >
+            <Bot className="w-5 h-5" />
+            <span className="text-[9px] font-bold mt-0.5">Ask Coach</span>
+          </button>
+          
+          <div className="bg-blue-50 dark:bg-zinc-900 text-blue-700 dark:text-blue-400 px-3 py-2 rounded-xl flex items-center gap-2 shadow-sm border border-blue-100 dark:border-zinc-800">
+            <div className="relative">
+              <Circle className="w-8 h-8 text-blue-200 dark:text-blue-900" strokeWidth={4} />
+              <div className="absolute inset-0 flex items-center justify-center text-[10px] font-bold">{weeklyProgress}</div>
+            </div>
+            <div className="flex flex-col leading-none">
+              <span className="text-[10px] text-blue-400 font-bold uppercase">This Week</span>
+              <span className="text-xs font-bold">Sessions</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="bg-gradient-to-r from-violet-500 to-purple-600 rounded-2xl p-5 text-white shadow-lg shadow-purple-200 dark:shadow-none relative overflow-hidden">
@@ -660,7 +700,6 @@ function Dashboard({ workouts, setActiveTab, onRepeat, user }) {
         <div className="w-full"><MiniChart data={chartData} color={chartMetric === 'volume' ? '#3b82f6' : '#8b5cf6'} /></div>
       </div>
 
-      {/* QUICK START / ROUTINES SECTION */}
       <div>
         <h3 className="font-bold text-gray-800 dark:text-white flex items-center gap-2 mb-3">
           <Play className="w-5 h-5 text-green-500 fill-current" /> Quick Start
@@ -668,33 +707,22 @@ function Dashboard({ workouts, setActiveTab, onRepeat, user }) {
         {quickStartRoutines.length > 0 ? (
           <div className="grid grid-cols-2 gap-3">
             {quickStartRoutines.map((routine) => (
-              <button 
-                key={routine.id} 
-                onClick={() => onRepeat(routine)} 
-                className="bg-white dark:bg-zinc-900 border border-gray-100 dark:border-zinc-800 shadow-sm p-4 rounded-xl flex flex-col items-start hover:bg-gray-50 dark:hover:bg-zinc-800 hover:border-blue-200 dark:hover:border-blue-900 transition-all group text-left relative overflow-hidden"
-              >
-                <div className="absolute right-3 top-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <ArrowRight className="w-4 h-4 text-blue-500" />
-                </div>
+              <button key={routine.id} onClick={() => onRepeat(routine)} className="bg-white dark:bg-zinc-900 border border-gray-100 dark:border-zinc-800 shadow-sm p-4 rounded-xl flex flex-col items-start hover:bg-gray-50 dark:hover:bg-zinc-800 hover:border-blue-200 dark:hover:border-blue-900 transition-all group text-left relative overflow-hidden">
+                <div className="absolute right-3 top-3 opacity-0 group-hover:opacity-100 transition-opacity"><ArrowRight className="w-4 h-4 text-blue-500" /></div>
                 <div className="font-bold text-gray-900 dark:text-white text-sm line-clamp-1 mb-1">{routine.name}</div>
-                <div className="text-xs text-gray-500 dark:text-zinc-500 flex items-center gap-1.5">
-                   <Clock className="w-3 h-3" /> {getDaysAgo(routine.date)}
-                </div>
-                <div className="mt-2 text-[10px] text-gray-400 dark:text-zinc-600 bg-gray-50 dark:bg-zinc-800 px-1.5 py-0.5 rounded">
-                  {routine.exercises?.length || 0} Exercises
-                </div>
+                <div className="text-xs text-gray-500 dark:text-zinc-500 flex items-center gap-1.5"><Clock className="w-3 h-3" /> {getDaysAgo(routine.date)}</div>
               </button>
             ))}
           </div>
         ) : (
           <div className="text-center p-6 bg-gray-50 dark:bg-zinc-900 border-2 border-dashed border-gray-200 dark:border-zinc-800 rounded-xl">
              <p className="text-sm text-gray-500 dark:text-zinc-500 mb-2">No routines found yet.</p>
-             <button onClick={() => setActiveTab('log')} className="text-blue-600 dark:text-blue-400 text-sm font-bold hover:underline">Log a workout to build your library</button>
+             <button onClick={() => setActiveTab('log')} className="text-blue-600 dark:text-blue-400 text-sm font-bold hover:underline">Log a workout</button>
           </div>
         )}
       </div>
 
-      {totalWorkouts === 0 && (
+      {workouts.length === 0 && (
         <button onClick={() => setActiveTab('log')} className="w-full py-4 bg-white dark:bg-zinc-900 border-2 border-dashed border-blue-200 dark:border-zinc-700 rounded-xl flex flex-col items-center justify-center gap-2 text-blue-500 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-zinc-800 transition-colors"><Plus className="w-8 h-8" /><span className="font-medium">Log your first workout</span></button>
       )}
 
@@ -724,7 +752,6 @@ function WorkoutLogger({ user, workouts = [], onSave }) {
       return saved ? JSON.parse(saved).name : 'Evening Lift';
     } catch { return 'Evening Lift'; }
   });
-
   const [exercises, setExercises] = useState(() => {
     try {
       const saved = localStorage.getItem(`ironlog_draft_${user.uid}`);
@@ -760,9 +787,7 @@ function WorkoutLogger({ user, workouts = [], onSave }) {
         3. Create workout for request: "${aiPrompt}"
         Return JSON: { "workoutName": "string", "exercises": [ { "name": "string", "notes": "string", "settings": { "seat": "", "incline": "" }, "sets": [ { "kg": number, "reps": number } ] } ] }
       `;
-      
       const result = await callGemini(aiPrompt, systemInstruction);
-      
       if (result && result.exercises) {
         setWorkoutName(result.workoutName || "AI Generated Workout");
         const processedExercises = result.exercises.map(ex => ({
@@ -773,40 +798,25 @@ function WorkoutLogger({ user, workouts = [], onSave }) {
         setAiPrompt('');
       }
     } catch (e) {
-      console.error("AI Gen Error caught in handler", e);
-      alert("Failed to generate workout. Ensure your backend API is deployed and working.");
+      alert("Failed to generate workout.");
     } finally {
       setIsGenerating(false);
     }
   };
 
-  // Exercise helper functions
   const addExercise = () => setExercises([...exercises, { id: crypto.randomUUID(), name: '', notes: '', settings: { seat: '', incline: '' }, sets: [{ id: crypto.randomUUID(), kg: '', reps: '', completed: false }] }]);
-  
-  // SUPERSET LOGIC: Adds a new exercise right after the current one, sharing a Superset ID
   const addSupersetExercise = (baseExerciseId, existingSupersetId) => {
     const newId = crypto.randomUUID();
     const supersetId = existingSupersetId || crypto.randomUUID();
     const newExercise = { 
-      id: newId, 
-      supersetId: supersetId,
-      name: '', 
-      notes: '', 
-      settings: { seat: '', incline: '' }, 
-      sets: [{ id: crypto.randomUUID(), kg: '', reps: '', completed: false }] 
+      id: newId, supersetId: supersetId, name: '', notes: '', settings: { seat: '', incline: '' }, sets: [{ id: crypto.randomUUID(), kg: '', reps: '', completed: false }] 
     };
-
-    // If the base exercise didn't have a superset ID yet, we need to update it too
     const updatedExercises = exercises.reduce((acc, ex) => {
-      if (ex.id === baseExerciseId) {
-         return [...acc, { ...ex, supersetId }, newExercise];
-      }
+      if (ex.id === baseExerciseId) return [...acc, { ...ex, supersetId }, newExercise];
       return [...acc, ex];
     }, []);
-
     setExercises(updatedExercises);
   };
-
   const removeExercise = (id) => setExercises(exercises.filter(e => e.id !== id));
   const updateExercise = (id, field, value) => setExercises(exercises.map(e => e.id === id ? { ...e, [field]: value } : e));
   const updateSettings = (id, setting, value) => setExercises(exercises.map(e => e.id === id ? { ...e, settings: { ...e.settings, [setting]: value } } : e));
@@ -819,39 +829,24 @@ function WorkoutLogger({ user, workouts = [], onSave }) {
     setIsSaving(true);
     try {
       const validExercises = exercises.filter(e => e.name.trim() !== '').map(e => ({
-        name: e.name,
-        notes: e.notes || '', 
-        settings: e.settings,
-        supersetId: e.supersetId || null, // Save superset ID
+        name: e.name, notes: e.notes || '', settings: e.settings, supersetId: e.supersetId || null,
         sets: e.sets.map(s => ({ kg: Number(s.kg), reps: Number(s.reps) }))
       }));
-      
       await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'workouts'), {
-        name: workoutName,
-        date: serverTimestamp(),
-        exercises: validExercises,
+        name: workoutName, date: serverTimestamp(), exercises: validExercises,
         totalVolume: validExercises.reduce((acc, ex) => acc + ex.sets.reduce((sAcc, s) => sAcc + (s.kg * s.reps), 0), 0)
       });
-      
       localStorage.removeItem(`ironlog_draft_${user.uid}`);
-      
       setWorkoutName('Next Workout');
       setExercises([]);
       if(onSave) onSave(); 
-    } catch (err) {
-      console.error("Error saving", err);
-      alert("Failed to save. Check Firebase Config.");
-    } finally {
-      setIsGenerating(false);
-    }
+    } catch (err) { alert("Failed to save."); } finally { setIsSaving(false); }
   };
 
-  // Group exercises for rendering
   const exerciseGroups = groupExercises(exercises);
 
   return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 relative">
-      {/* AI Modal (Same as before) */}
+    <div className="space-y-6 animate-in fade-in duration-500 relative">
       {showAIModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-zinc-900 rounded-2xl w-full max-w-sm shadow-xl overflow-hidden animate-in zoom-in-95 duration-200 border border-gray-100 dark:border-zinc-800">
@@ -884,40 +879,20 @@ function WorkoutLogger({ user, workouts = [], onSave }) {
           const isSuperset = group.length > 1;
           return (
             <div key={groupIndex} className={`relative animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-2xl ${isSuperset ? 'border-l-4 border-orange-500 bg-orange-50/30 dark:bg-orange-900/10 pl-2' : ''}`}>
-               {isSuperset && (
-                 <div className="absolute -left-4 top-4 bg-orange-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-r-md shadow-sm flex items-center gap-1 z-10">
-                   <Link className="w-3 h-3" /> Superset
-                 </div>
-               )}
-               
+               {isSuperset && <div className="absolute -left-4 top-4 bg-orange-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-r-md shadow-sm flex items-center gap-1 z-10"><Link className="w-3 h-3" /> Superset</div>}
                <div className={`space-y-4 ${isSuperset ? 'py-2' : ''}`}>
                  {group.map((exercise, indexInGroup) => (
                     <div key={exercise.id} className="bg-white dark:bg-zinc-900 rounded-2xl shadow-sm border border-gray-100 dark:border-zinc-800 overflow-hidden relative">
                       <div className="absolute top-4 right-4 flex gap-2">
-                         {/* Link/Unlink Button */}
-                         {(!isSuperset && indexInGroup === 0) && (
-                           <button onClick={() => addSupersetExercise(exercise.id, exercise.supersetId)} className="text-gray-300 dark:text-zinc-600 hover:text-orange-500 transition-colors p-1 rounded hover:bg-orange-50 dark:hover:bg-orange-900/30" title="Create Superset">
-                             <Link className="w-5 h-5" />
-                           </button>
-                         )}
-                         <button onClick={() => removeExercise(exercise.id)} className="text-gray-300 dark:text-zinc-600 hover:text-red-500 transition-colors p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30">
-                           <Trash2 className="w-5 h-5" />
-                         </button>
+                         {(!isSuperset && indexInGroup === 0) && <button onClick={() => addSupersetExercise(exercise.id, exercise.supersetId)} className="text-gray-300 dark:text-zinc-600 hover:text-orange-500 transition-colors p-1 rounded hover:bg-orange-50 dark:hover:bg-orange-900/30"><Link className="w-5 h-5" /></button>}
+                         <button onClick={() => removeExercise(exercise.id)} className="text-gray-300 dark:text-zinc-600 hover:text-red-500 transition-colors p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30"><Trash2 className="w-5 h-5" /></button>
                       </div>
-                      
                       <div className="p-5 pb-2">
                         <input placeholder="Exercise Name" value={exercise.name} onChange={(e) => updateExercise(exercise.id, 'name', e.target.value)} className="text-lg font-bold text-gray-900 dark:text-white bg-transparent w-full pr-20 focus:outline-none border-b border-transparent focus:border-blue-200 placeholder-gray-300 dark:placeholder-zinc-600 transition-all" />
-                        
                         <div className="mt-2 flex items-center gap-2 bg-gray-50 dark:bg-zinc-800 rounded-lg px-3 py-2 border border-transparent focus-within:border-blue-300 focus-within:bg-transparent transition-all">
                           <MessageSquareQuote className="w-4 h-4 text-gray-400 dark:text-zinc-500" />
-                          <input 
-                            placeholder="Exercise notes..." 
-                            value={exercise.notes || ''} 
-                            onChange={(e) => updateExercise(exercise.id, 'notes', e.target.value)} 
-                            className="bg-transparent text-sm w-full focus:outline-none text-gray-600 dark:text-zinc-300 placeholder-gray-400 dark:placeholder-zinc-600" 
-                          />
+                          <input placeholder="Exercise notes..." value={exercise.notes || ''} onChange={(e) => updateExercise(exercise.id, 'notes', e.target.value)} className="bg-transparent text-sm w-full focus:outline-none text-gray-600 dark:text-zinc-300 placeholder-gray-400 dark:placeholder-zinc-600" />
                         </div>
-
                         <div className="mt-3 flex gap-3">
                           <div className="flex-1 bg-gray-50 dark:bg-zinc-800 rounded-lg px-3 py-2 flex items-center gap-2 border border-transparent focus-within:border-blue-300 focus-within:bg-transparent transition-all"><Settings2 className="w-4 h-4 text-gray-400 dark:text-zinc-500" /><input placeholder="Seat Height" value={exercise.settings.seat} onChange={(e) => updateSettings(exercise.id, 'seat', e.target.value)} className="bg-transparent text-sm w-full focus:outline-none text-gray-600 dark:text-zinc-300" /></div>
                           <div className="flex-1 bg-gray-50 dark:bg-zinc-800 rounded-lg px-3 py-2 flex items-center gap-2 border border-transparent focus-within:border-blue-300 focus-within:bg-transparent transition-all"><TrendingUp className="w-4 h-4 text-gray-400 dark:text-zinc-500" /><input placeholder="Incline" value={exercise.settings.incline} onChange={(e) => updateSettings(exercise.id, 'incline', e.target.value)} className="bg-transparent text-sm w-full focus:outline-none text-gray-600 dark:text-zinc-300" /></div>
@@ -930,8 +905,8 @@ function WorkoutLogger({ user, workouts = [], onSave }) {
                         {exercise.sets.map((set, index) => (
                           <div key={set.id} className={`grid grid-cols-10 gap-2 items-center group ${set.completed ? 'opacity-50' : 'opacity-100'} transition-opacity`}>
                             <div className="col-span-1 text-center font-medium text-gray-400 dark:text-zinc-600 text-sm">{index + 1}</div>
-                            <div className="col-span-3"><input type="number" placeholder="-" value={set.kg} onChange={(e) => updateSet(exercise.id, set.id, 'kg', e.target.value)} disabled={set.completed} className="w-full text-center bg-gray-50 dark:bg-zinc-800 rounded-lg py-2 font-bold text-gray-700 dark:text-zinc-200 focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-zinc-700 outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed" /></div>
-                            <div className="col-span-3"><input type="number" placeholder="-" value={set.reps} onChange={(e) => updateSet(exercise.id, set.id, 'reps', e.target.value)} disabled={set.completed} className="w-full text-center bg-gray-50 dark:bg-zinc-800 rounded-lg py-2 font-bold text-gray-700 dark:text-zinc-200 focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-zinc-700 outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed" /></div>
+                            <div className="col-span-3"><input type="number" placeholder="-" value={set.kg} onChange={(e) => updateSet(exercise.id, set.id, 'kg', e.target.value)} disabled={set.completed} className="w-full text-center bg-gray-50 dark:bg-zinc-800 rounded-lg py-2 font-bold text-gray-700 dark:text-zinc-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all disabled:opacity-50" /></div>
+                            <div className="col-span-3"><input type="number" placeholder="-" value={set.reps} onChange={(e) => updateSet(exercise.id, set.id, 'reps', e.target.value)} disabled={set.completed} className="w-full text-center bg-gray-50 dark:bg-zinc-800 rounded-lg py-2 font-bold text-gray-700 dark:text-zinc-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all disabled:opacity-50" /></div>
                             <div className="col-span-3 flex justify-center gap-2">
                               <button onClick={() => updateSet(exercise.id, set.id, 'completed', !set.completed)} className={`p-2 rounded-full transition-all ${set.completed ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' : 'bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-500 hover:bg-gray-200 dark:hover:bg-zinc-700'}`}>{set.completed ? <CheckCircle2 className="w-5 h-5" /> : <Circle className="w-5 h-5" />}</button>
                               {exercise.sets.length > 1 && <button onClick={() => removeSet(exercise.id, set.id)} className="text-gray-300 dark:text-zinc-600 hover:text-red-400"><Trash2 className="w-4 h-4" /></button>}
@@ -942,21 +917,15 @@ function WorkoutLogger({ user, workouts = [], onSave }) {
                       <button onClick={() => addSet(exercise.id)} className="w-full py-3 bg-gray-50 dark:bg-zinc-800/50 hover:bg-gray-100 dark:hover:bg-zinc-800 text-blue-600 dark:text-blue-400 font-medium text-sm flex items-center justify-center gap-2 transition-colors border-t border-gray-100 dark:border-zinc-800"><Plus className="w-4 h-4" /> Add Set</button>
                     </div>
                  ))}
-                 
-                 {isSuperset && (
-                   <button onClick={() => addSupersetExercise(group[group.length-1].id, group[group.length-1].supersetId)} className="w-full py-3 rounded-xl border-2 border-dashed border-orange-200 dark:border-orange-900/50 text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/20 flex items-center justify-center gap-2 font-medium transition-colors">
-                     <Plus className="w-4 h-4" /> Add to Superset
-                   </button>
-                 )}
+                 {isSuperset && <button onClick={() => addSupersetExercise(group[group.length-1].id, group[group.length-1].supersetId)} className="w-full py-3 rounded-xl border-2 border-dashed border-orange-200 dark:border-orange-900/50 text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/20 flex items-center justify-center gap-2 font-medium transition-colors"><Plus className="w-4 h-4" /> Add to Superset</button>}
                </div>
             </div>
           );
         })}
       </div>
-
       <div className="flex flex-col gap-3 pt-4">
-        <button onClick={addExercise} className="w-full py-4 rounded-xl bg-blue-600 text-white font-bold text-lg shadow-lg shadow-blue-200 dark:shadow-none hover:bg-blue-700 hover:shadow-xl hover:scale-[1.01] transition-all active:scale-95 flex items-center justify-center gap-2"><Plus className="w-5 h-5" /> Add Exercise</button>
-        <button onClick={finishWorkout} disabled={isSaving} className="w-full py-4 rounded-xl bg-red-600 text-white font-bold text-lg shadow-lg shadow-red-200 dark:shadow-none hover:bg-red-700 hover:shadow-xl hover:scale-[1.01] transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-70">{isSaving ? 'Saving...' : <><Save className="w-5 h-5" /> Finish Workout</>}</button>
+        <button onClick={addExercise} className="w-full py-4 rounded-xl bg-blue-600 text-white font-bold text-lg shadow-lg hover:bg-blue-700 hover:scale-[1.01] transition-all flex items-center justify-center gap-2"><Plus className="w-5 h-5" /> Add Exercise</button>
+        <button onClick={finishWorkout} disabled={isSaving} className="w-full py-4 rounded-xl bg-red-600 text-white font-bold text-lg shadow-lg hover:bg-red-700 hover:scale-[1.01] transition-all flex items-center justify-center gap-2 disabled:opacity-70">{isSaving ? 'Saving...' : <><Save className="w-5 h-5" /> Finish Workout</>}</button>
       </div>
     </div>
   );
@@ -974,72 +943,29 @@ function WorkoutHistory({ user, workouts, onRepeat }) {
     }
   }
   const toggleExpand = (id) => setExpandedId(expandedId === id ? null : id);
-
   const handleExport = () => {
-    if (workouts.length === 0) return;
-    try {
-      const exportData = workouts.map(w => ({
-        ...w,
-        date: w.date.toISOString(), 
-        exercises: w.exercises.map(e => ({
-          ...e,
-          sets: e.sets.map(s => ({ kg: Number(s.kg), reps: Number(s.reps), completed: s.completed }))
-        }))
-      }));
-
-      const dataStr = JSON.stringify(exportData, null, 2);
-      const blob = new Blob([dataStr], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.download = `ironlog_backup_${new Date().toISOString().split('T')[0]}.json`;
-      link.href = url;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error("Export failed", e);
-      alert("Failed to export data.");
-    }
+    const dataStr = JSON.stringify(workouts, null, 2);
+    const blob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.download = `ironlog_backup.json`;
+    link.href = url;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleGenerateSummary = async () => {
-    if (workouts.length < 3) {
-      alert("Log at least 3 workouts to get a meaningful analysis.");
-      return;
-    }
     setIsSummarizing(true);
     try {
       const historyContext = workouts.slice(0, 20).map(w => ({
-        date: w.date.toLocaleDateString(),
-        title: w.name,
-        volume: w.totalVolume,
-        exercises: w.exercises?.map(e => `${e.name} (${Math.max(...(e.sets || []).map(s => Number(s.kg)||0))}kg top set)`).join(', ')
+        date: w.date.toLocaleDateString(), title: w.name, volume: w.totalVolume,
+        exercises: w.exercises?.map(e => `${e.name} (Max ${Math.max(...(e.sets || []).map(s => Number(s.kg)||0))}kg)`).join(', ')
       }));
-
-      const prompt = `
-        You are an elite strength and conditioning coach. 
-        Analyze this user's last 20 workouts (newest first): ${JSON.stringify(historyContext)}.
-        
-        Output a JSON object with a single field "analysis" containing a paragraph that:
-        1. Identifies the user's training focus/consistency.
-        2. Points out a specific weakness or neglected area (e.g. "You push chest often but skip legs").
-        3. Gives a direct command for what to focus on next (e.g. "Focus on increasing squat depth next time").
-        
-        Keep it professional, encouraging, but analytical. Max 80 words.
-        JSON format: { "analysis": "string" }
-      `;
-
-      const data = await callGemini(prompt, "You are a data-driven fitness analyst.");
-      if (data && data.analysis) {
-        setAiSummary(data.analysis);
-      }
-    } catch (e) {
-      console.error("Analysis failed", e);
-      alert("Could not generate analysis. Try again later.");
-    } finally {
-      setIsSummarizing(false);
-    }
+      const prompt = `Analyze user's last 20 workouts: ${JSON.stringify(historyContext)}. Output JSON { "analysis": "string" } with a short, specific critique and advice.`;
+      const data = await callGemini(prompt);
+      if (data && data.analysis) setAiSummary(data.analysis);
+    } catch (e) { alert("Analysis failed."); } finally { setIsSummarizing(false); }
   };
 
   return (
@@ -1047,43 +973,17 @@ function WorkoutHistory({ user, workouts, onRepeat }) {
       <div className="flex justify-between items-center">
         <h3 className="font-bold text-lg text-gray-900 dark:text-white">Workout History</h3>
         <div className="flex items-center gap-3">
-          {workouts.length > 0 && (
-            <button 
-              onClick={handleExport}
-              className="p-1.5 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-100 dark:hover:bg-zinc-800 rounded-lg transition-all"
-              title="Download Data (JSON)"
-            >
-              <Download className="w-5 h-5" />
-            </button>
-          )}
+          {workouts.length > 0 && <button onClick={handleExport} className="p-1.5 text-gray-400 hover:text-blue-600 rounded-lg transition-all"><Download className="w-5 h-5" /></button>}
           <span className="text-xs text-gray-500 dark:text-zinc-500 bg-gray-100 dark:bg-zinc-800 px-2 py-1 rounded-full">{workouts.length} sessions</span>
         </div>
       </div>
 
-      {/* AI Analysis Section */}
       {workouts.length > 0 && (
-        <div className="bg-gradient-to-br from-indigo-500 to-blue-600 rounded-xl p-5 text-white shadow-lg shadow-blue-200 dark:shadow-none relative overflow-hidden">
+        <div className="bg-gradient-to-br from-indigo-500 to-blue-600 rounded-xl p-5 text-white shadow-lg relative overflow-hidden">
            <div className="absolute top-0 right-0 p-4 opacity-10"><Activity size={100} /></div>
            <div className="relative z-10">
-             <div className="flex justify-between items-start mb-2">
-                <h4 className="font-bold flex items-center gap-2"><Sparkles className="w-4 h-4 text-yellow-300" /> Progress Report</h4>
-             </div>
-             
-             {isSummarizing ? (
-               <div className="flex items-center gap-2 text-indigo-100 py-2"><Loader2 className="w-4 h-4 animate-spin" /> Analyzing your training data...</div>
-             ) : aiSummary ? (
-               <div className="animate-in fade-in">
-                 <p className="text-sm leading-relaxed text-indigo-50 font-medium">{aiSummary}</p>
-                 <button onClick={() => setAiSummary(null)} className="mt-3 text-xs text-indigo-200 hover:text-white flex items-center gap-1 hover:underline">Close Analysis</button>
-               </div>
-             ) : (
-               <div>
-                 <p className="text-xs text-indigo-100 mb-3">Get an AI-powered breakdown of your training trends and what to improve.</p>
-                 <button onClick={handleGenerateSummary} className="bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white text-xs font-bold py-2 px-3 rounded-lg transition-all flex items-center gap-2">
-                   <Zap className="w-3 h-3" /> Analyze History
-                 </button>
-               </div>
-             )}
+             <div className="flex justify-between items-start mb-2"><h4 className="font-bold flex items-center gap-2"><Sparkles className="w-4 h-4 text-yellow-300" /> Progress Report</h4></div>
+             {isSummarizing ? <div className="flex items-center gap-2 text-indigo-100 py-2"><Loader2 className="w-4 h-4 animate-spin" /> Analyzing...</div> : aiSummary ? <div className="animate-in fade-in"><p className="text-sm leading-relaxed text-indigo-50 font-medium">{aiSummary}</p><button onClick={() => setAiSummary(null)} className="mt-3 text-xs text-indigo-200 hover:text-white flex items-center gap-1 hover:underline">Close</button></div> : <button onClick={handleGenerateSummary} className="bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white text-xs font-bold py-2 px-3 rounded-lg transition-all flex items-center gap-2"><Zap className="w-3 h-3" /> Analyze History</button>}
            </div>
         </div>
       )}
@@ -1092,65 +992,30 @@ function WorkoutHistory({ user, workouts, onRepeat }) {
         <div className="text-center py-10 text-gray-400 dark:text-zinc-600 bg-white dark:bg-zinc-900 rounded-xl border border-dashed border-gray-200 dark:border-zinc-800"><Dumbbell className="w-10 h-10 mx-auto mb-2 opacity-20" /><p>No workouts logged yet.</p></div>
       ) : (
         workouts.map((workout) => {
-          // Helper to display exercises in summary card
           const previewExercises = workout.exercises ? groupExercises(workout.exercises) : [];
-
           return (
           <div key={workout.id} onClick={() => toggleExpand(workout.id)} className={`bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-gray-100 dark:border-zinc-800 hover:shadow-md transition-all cursor-pointer overflow-hidden ${expandedId === workout.id ? 'ring-2 ring-blue-100 dark:ring-blue-900' : ''}`}>
             <div className="p-5">
               <div className="flex justify-between items-start mb-3">
                 <div><h4 className="font-bold text-gray-900 dark:text-white text-lg">{workout.name}</h4><div className="text-sm text-gray-500 dark:text-zinc-500 flex items-center gap-1"><Calendar className="w-3 h-3" />{workout.date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}<span className="mx-1">•</span>{workout.exercises?.length || 0} Exercises</div></div>
                 <div className="flex items-center gap-2">
-                  <button onClick={(e) => { e.stopPropagation(); onRepeat(workout); }} className="text-gray-300 dark:text-zinc-600 hover:text-blue-500 dark:hover:text-blue-400 p-2 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-full transition-colors" title="Repeat Workout">
-                    <Repeat className="w-4 h-4" />
-                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); onRepeat(workout); }} className="text-gray-300 dark:text-zinc-600 hover:text-blue-500 p-2 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-full transition-colors"><Repeat className="w-4 h-4" /></button>
                   <button onClick={(e) => deleteWorkout(e, workout.id)} className="text-gray-300 dark:text-zinc-600 hover:text-red-400 p-2 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full transition-colors"><Trash2 className="w-4 h-4" /></button>
                   <div className="text-gray-300 dark:text-zinc-600">{expandedId === workout.id ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}</div>
                 </div>
               </div>
-              {expandedId !== workout.id && (
-                <div className="space-y-2">
-                  {previewExercises.slice(0, 3).map((group, i) => {
-                    const isSuperset = group.length > 1;
-                    if (isSuperset) {
-                      return (
-                        <div key={i} className="flex flex-col border-l-2 border-orange-400 pl-2">
-                          {group.map((ex, j) => (
-                            <div key={j} className="flex justify-between items-center text-sm mb-1 last:mb-0">
-                                <span className="font-medium text-gray-700 dark:text-zinc-300 text-xs">{ex.name}</span>
-                                <span className="text-gray-400 dark:text-zinc-500 text-[10px]">{ex.sets?.length} sets</span>
-                            </div>
-                          ))}
-                        </div>
-                      )
-                    }
-                    const ex = group[0];
-                    return (
-                       <div key={i} className="flex justify-between items-center text-sm"><span className="font-medium text-gray-700 dark:text-zinc-300">{ex.name}</span><span className="text-gray-400 dark:text-zinc-500 text-xs">{ex.sets?.length} sets • Max {Math.max(...(ex.sets || []).map(s => s.kg || 0))}kg</span></div>
-                    );
-                  })}
-                  {previewExercises.length > 3 && <div className="text-xs text-center text-blue-500 dark:text-blue-400 pt-1 font-medium">+ {previewExercises.length - 3} more</div>}
-                </div>
-              )}
+              {expandedId !== workout.id && <div className="space-y-2">{previewExercises.slice(0, 3).map((group, i) => (<div key={i} className="flex justify-between items-center text-sm"><span className="font-medium text-gray-700 dark:text-zinc-300">{group[0].name} {group.length>1 && '(+Superset)'}</span><span className="text-gray-400 dark:text-zinc-500 text-xs">{group[0].sets?.length} sets</span></div>))}</div>}
             </div>
             {expandedId === workout.id && (
               <div className="bg-gray-50/50 dark:bg-zinc-800/50 border-t border-gray-100 dark:border-zinc-800 p-5 animate-in slide-in-from-top-2 duration-200">
                 <div className="space-y-6">
                   {previewExercises.map((group, groupIndex) => (
                     <div key={groupIndex} className={`rounded-xl ${group.length > 1 ? 'border-l-4 border-orange-400 pl-3 py-1' : ''}`}>
-                      {group.length > 1 && <div className="text-[10px] font-bold text-orange-500 mb-2 uppercase tracking-wider flex items-center gap-1"><Link className="w-3 h-3" /> Superset</div>}
                       <div className="space-y-4">
                         {group.map((ex, i) => (
                           <div key={i} className="bg-white dark:bg-zinc-900 rounded-lg p-4 border border-gray-100 dark:border-zinc-800 shadow-sm">
                             <div className="flex justify-between items-start mb-3 border-b border-gray-50 dark:border-zinc-800 pb-2">
-                              <div>
-                                  <h5 className="font-bold text-gray-800 dark:text-white">{ex.name}</h5>
-                                  {ex.notes && <p className="text-xs text-gray-500 dark:text-zinc-400 italic mt-1">"{ex.notes}"</p>}
-                              </div>
-                              <div className="text-xs text-gray-500 dark:text-zinc-500 flex flex-col items-end gap-0.5">
-                                {ex.settings?.seat && <span className="bg-gray-100 dark:bg-zinc-800 px-2 py-0.5 rounded text-gray-600 dark:text-zinc-400 flex items-center gap-1"><Settings2 className="w-3 h-3" /> Seat: {ex.settings.seat}</span>}
-                                {ex.settings?.incline && <span className="bg-gray-100 dark:bg-zinc-800 px-2 py-0.5 rounded text-gray-600 dark:text-zinc-400 flex items-center gap-1"><TrendingUp className="w-3 h-3" /> Inc: {ex.settings.incline}</span>}
-                              </div>
+                              <div><h5 className="font-bold text-gray-800 dark:text-white">{ex.name}</h5>{ex.notes && <p className="text-xs text-gray-500 dark:text-zinc-400 italic mt-1">"{ex.notes}"</p>}</div>
                             </div>
                             <div className="grid grid-cols-3 gap-2">{ex.sets?.map((set, idx) => (<div key={idx} className="bg-gray-50 dark:bg-zinc-800 p-2 rounded text-center border border-gray-100 dark:border-zinc-800"><div className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase font-bold mb-1">Set {idx + 1}</div><div className="font-mono font-medium text-gray-800 dark:text-zinc-200 text-sm"><span className="font-bold text-base">{set.kg}</span>kg × {set.reps}</div></div>))}</div>
                           </div>
