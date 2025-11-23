@@ -387,10 +387,11 @@ function CoachChat({ user, workouts }) {
         - Personal Records (Est): ${JSON.stringify(records)}
         
         INSTRUCTIONS:
-        1. Answer the user's question concisely (under 80 words unless asked for a plan).
+        1. Answer the user's question concisely (under 100 words unless asked for a plan).
         2. USE THE DATA. If they ask "Is my bench going up?", look at the records provided. 
         3. GUARDRAILS: Only answer questions about fitness, workouts, anatomy, or nutrition/diet. If the user asks about politics, coding, or other topics, politely refuse and steer back to training.
         4. Keep tone encouraging but analytical.
+        5. Respond in plain conversational text, **not JSON**, no code blocks.
       `;
 
       // 2. Call AI
