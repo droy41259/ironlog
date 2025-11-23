@@ -338,7 +338,7 @@ export default function App() {
   );
 }
 
-// --- NEW COMPONENT: CoachChat ---
+// --- COACH CHAT COMPONENT (FIXED) ---
 function CoachChat({ user, workouts }) {
   const [messages, setMessages] = useState([
     { role: 'model', text: `Hi! I'm your IronLog Coach. I have access to your ${workouts.length} logged workouts. Ask me about your progress, routine ideas, or form tips!` }
@@ -391,17 +391,43 @@ function CoachChat({ user, workouts }) {
         2. USE THE DATA. If they ask "Is my bench going up?", look at the records provided. 
         3. GUARDRAILS: Only answer questions about fitness, workouts, anatomy, or nutrition/diet. If the user asks about politics, coding, or other topics, politely refuse and steer back to training.
         4. Keep tone encouraging but analytical.
-        5. Respond in plain conversational text, **not JSON**, no code blocks.
+        5. **CRITICAL: Respond in readable MARKDOWN format.** Use bold text and bullet lists. 
+        6. **ABSOLUTELY NO JSON.** Do not return code. If suggesting a workout, format it like this:
+           "Here is a plan:
+            **Leg Day**
+            * Squats: 3 sets of 10
+            * Lunges: 3 sets of 12"
       `;
 
       // 2. Call AI
       const response = await callGemini(userMsg, systemInstruction);
       
-      // Handle if response is object (from JSON parse) or string
-      const textResponse = typeof response === 'object' && response.text ? response.text : (typeof response === 'string' ? response : JSON.stringify(response));
+      let textResponse = "";
+
+      // 3. Robust Handling: Detect if AI still returned JSON despite instructions
+      if (typeof response === 'object' && !response.text) {
+        // AI returned a raw object (e.g. workout plan JSON). Format it manually.
+        if (response.workout_name || response.exercises) {
+            textResponse += `**${response.workout_name || 'Suggested Workout'}**\n`;
+            if (response.focus) textResponse += `*Focus: ${response.focus}*\n\n`;
+            if (Array.isArray(response.exercises)) {
+                response.exercises.forEach(ex => {
+                    textResponse += `• **${ex.name}**: ${ex.sets || '?'} sets x ${ex.reps || '?'} reps ${ex.notes ? `(${ex.notes})` : ''}\n`;
+                });
+            }
+        } else {
+             // Generic object fallback
+             textResponse = Object.entries(response).map(([k,v]) => `**${k}**: ${v}`).join('\n');
+        }
+      } else if (typeof response === 'object' && response.text) {
+        textResponse = response.text;
+      } else {
+        textResponse = String(response);
+      }
 
       setMessages(prev => [...prev, { role: 'model', text: textResponse }]);
     } catch (error) {
+      console.error(error);
       setMessages(prev => [...prev, { role: 'model', text: "Sorry, I'm having trouble analyzing your data right now." }]);
     } finally {
       setIsTyping(false);
@@ -427,7 +453,7 @@ function CoachChat({ user, workouts }) {
       <div className="flex-1 overflow-y-auto space-y-4 px-2 pb-4 no-scrollbar">
         {messages.map((msg, idx) => (
           <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[85%] p-3 rounded-2xl text-sm ${
+            <div className={`max-w-[85%] p-3 rounded-2xl text-sm whitespace-pre-wrap leading-relaxed ${
               msg.role === 'user' 
                 ? 'bg-blue-600 text-white rounded-br-none' 
                 : 'bg-white dark:bg-zinc-800 text-gray-800 dark:text-zinc-200 border border-gray-100 dark:border-zinc-700 rounded-bl-none shadow-sm'
