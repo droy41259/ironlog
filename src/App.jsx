@@ -338,7 +338,7 @@ export default function App() {
   );
 }
 
-// --- COACH CHAT COMPONENT (FIXED) ---
+// --- COACH CHAT COMPONENT (FIXED: Memory + JSON Formatting) ---
 function CoachChat({ user, workouts }) {
   const [messages, setMessages] = useState([
     { role: 'model', text: `Hi! I'm your IronLog Coach. I have access to your ${workouts.length} logged workouts. Ask me about your progress, routine ideas, or form tips!` }
@@ -355,10 +355,24 @@ function CoachChat({ user, workouts }) {
     scrollToBottom();
   }, [messages]);
 
+  // Recursively format unknown JSON objects into readable text
+  const formatRecursive = (obj, depth = 0) => {
+    if (typeof obj !== 'object' || obj === null) return String(obj);
+    if (Array.isArray(obj)) {
+      return obj.map(item => `\n${'  '.repeat(depth)}• ${formatRecursive(item, depth + 1)}`).join('');
+    }
+    return Object.entries(obj).map(([key, val]) => {
+      // Skip internal keys if the AI returns them
+      if (['response', 'message', 'text', 'answer'].includes(key.toLowerCase()) && typeof val === 'string') return val;
+      return `\n${'  '.repeat(depth)}**${key.replace(/_/g, ' ')}**: ${formatRecursive(val, depth + 1)}`;
+    }).join('');
+  };
+
   const handleSend = async () => {
     if (!input.trim()) return;
     const userMsg = input;
-    setMessages(prev => [...prev, { role: 'user', text: userMsg }]);
+    const newMessages = [...messages, { role: 'user', text: userMsg }];
+    setMessages(newMessages);
     setInput("");
     setIsTyping(true);
 
@@ -380,44 +394,49 @@ function CoachChat({ user, workouts }) {
         });
       });
 
+      // 2. Build Conversation History (Fixes "No Memory" issue)
+      // We grab the last 10 messages so the AI knows what was just said
+      const historyContext = newMessages.slice(-10).map(m => 
+        `${m.role === 'user' ? 'User' : 'Coach'}: ${m.text}`
+      ).join('\n');
+
       const systemInstruction = `
         You are an elite fitness coach for the IronLog app. 
+        
         USER DATA CONTEXT:
         - Recent Workouts: ${JSON.stringify(recentWorkouts)}
         - Personal Records (Est): ${JSON.stringify(records)}
         
+        CONVERSATION HISTORY (Most recent last):
+        ${historyContext}
+        
         INSTRUCTIONS:
-        1. Answer the user's question concisely (under 100 words unless asked for a plan).
+        1. Answer the user's question concisely.
         2. USE THE DATA. If they ask "Is my bench going up?", look at the records provided. 
-        3. GUARDRAILS: Only answer questions about fitness, workouts, anatomy, or nutrition/diet. If the user asks about politics, coding, or other topics, politely refuse and steer back to training.
-        4. Keep tone encouraging but analytical.
-        5. **CRITICAL: Respond in readable MARKDOWN format.** Use bold text and bullet lists. 
-        6. **ABSOLUTELY NO JSON.** Do not return code. If suggesting a workout, format it like this:
-           "Here is a plan:
-            **Leg Day**
-            * Squats: 3 sets of 10
-            * Lunges: 3 sets of 12"
+        3. GUARDRAILS: Only answer questions about fitness, workouts, anatomy, or nutrition/diet.
+        4. **CRITICAL: Respond in readable MARKDOWN format.** Use bold text and bullet lists. 
+        5. **ABSOLUTELY NO JSON.** Do not return code blocks. Write naturally.
       `;
 
-      // 2. Call AI
+      // 3. Call AI
+      // We send the history inside the prompt context as well to be safe
       const response = await callGemini(userMsg, systemInstruction);
       
       let textResponse = "";
 
-      // 3. Robust Handling: Detect if AI still returned JSON despite instructions
+      // 4. Robust Handling: Fixes "[object Object]" issues
       if (typeof response === 'object' && !response.text) {
-        // AI returned a raw object (e.g. workout plan JSON). Format it manually.
-        if (response.workout_name || response.exercises) {
-            textResponse += `**${response.workout_name || 'Suggested Workout'}**\n`;
-            if (response.focus) textResponse += `*Focus: ${response.focus}*\n\n`;
-            if (Array.isArray(response.exercises)) {
-                response.exercises.forEach(ex => {
-                    textResponse += `• **${ex.name}**: ${ex.sets || '?'} sets x ${ex.reps || '?'} reps ${ex.notes ? `(${ex.notes})` : ''}\n`;
-                });
-            }
+        // If AI ignores instructions and returns JSON, manually format it
+        if (response.response || response.message || response.answer) {
+             textResponse = response.response || response.message || response.answer;
+             // If there are other useful keys (like 'principles'), append them
+             const otherKeys = Object.keys(response).filter(k => !['response','message','answer','text'].includes(k));
+             if (otherKeys.length > 0) {
+                 textResponse += "\n" + formatRecursive(Object.fromEntries(otherKeys.map(k => [k, response[k]])));
+             }
         } else {
-             // Generic object fallback
-             textResponse = Object.entries(response).map(([k,v]) => `**${k}**: ${v}`).join('\n');
+             // Fallback: fully format the object
+             textResponse = formatRecursive(response);
         }
       } else if (typeof response === 'object' && response.text) {
         textResponse = response.text;
