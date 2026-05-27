@@ -1,6 +1,6 @@
 "use client";
 
-import { LogOut, Moon, Sun, Settings as SettingsIcon } from "lucide-react";
+import { LogOut, Moon, Sun, Settings as SettingsIcon, Activity } from "lucide-react";
 import Link from "next/link";
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase/client";
@@ -10,9 +10,15 @@ export function TopBar() {
   const { effective, setTheme } = useTheme();
   return (
     <nav
-      className="sticky top-0 z-30 px-4 py-3 flex justify-end items-center bg-white/70 dark:bg-zinc-950/70 backdrop-blur-xl"
+      className="sticky top-0 z-30 px-4 py-3 flex justify-between items-center bg-white/70 dark:bg-zinc-950/70 backdrop-blur-xl"
       style={{ paddingTop: "calc(env(safe-area-inset-top) + 0.75rem)" }}
     >
+      <Link href="/dashboard" className="flex items-center gap-2 group">
+        <div className="bg-gradient-to-br from-brand-500 to-brand-700 p-1.5 rounded-lg shadow-sm shadow-brand-500/20 group-hover:scale-105 transition-transform">
+          <Activity className="text-white w-4 h-4" strokeWidth={2.5} aria-hidden />
+        </div>
+        <span className="font-bold text-base tracking-tight text-zinc-900 dark:text-white">IronLog</span>
+      </Link>
       <div className="flex items-center gap-1">
         <button
           onClick={() => setTheme(effective === "dark" ? "light" : "dark")}
