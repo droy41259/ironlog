@@ -9,6 +9,7 @@ import { appendCoachMessage, subscribeToCoachMessages } from "@/lib/firebase/rep
 import { callGemini } from "@/lib/ai/gemini-client";
 import { COACH_SYSTEM_PROMPT } from "@/lib/ai/system-prompts";
 import { computePRs } from "@/lib/analytics/personal-records";
+import { Markdown } from "@/components/coach/Markdown";
 import type { CoachMessage } from "@/types/ai";
 
 export default function CoachPage() {
@@ -98,13 +99,13 @@ ${history}`;
         {messages.map((m) => (
           <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
             <div
-              className={`max-w-[85%] p-3 rounded-2xl text-sm whitespace-pre-wrap leading-relaxed ${
+              className={`max-w-[85%] p-3 rounded-2xl text-sm leading-relaxed ${
                 m.role === "user"
-                  ? "bg-brand-600 text-white rounded-br-none"
+                  ? "bg-brand-600 text-white rounded-br-none whitespace-pre-wrap"
                   : "bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-100 dark:border-zinc-700 rounded-bl-none shadow-sm"
               }`}
             >
-              {m.text}
+              {m.role === "user" ? m.text : <Markdown text={m.text} />}
             </div>
           </div>
         ))}
