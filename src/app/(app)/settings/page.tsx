@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { signOut, sendPasswordResetEmail, deleteUser } from "firebase/auth";
 import { useRouter } from "next/navigation";
-import { Scale, Palette, Mail, LogOut, AlertTriangle, Target, RotateCcw } from "lucide-react";
+import { Scale, Palette, Mail, LogOut, AlertTriangle, Target, RotateCcw, Timer } from "lucide-react";
 import { auth } from "@/lib/firebase/client";
 import { useAuth } from "@/providers/AuthProvider";
 import { useTheme } from "@/providers/ThemeProvider";
@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/Button";
 import { Confirm } from "@/components/ui/Confirm";
 import { useMuscleTargets, type DisplayMuscle } from "@/hooks/useMuscleTargets";
 import { useTrackedMuscles } from "@/hooks/useTrackedMuscles";
+import { useRestTimerEnabled } from "@/hooks/useRestTimerEnabled";
 import { ALL_MUSCLE_ROWS } from "@/components/dashboard/MuscleBalance";
 import { Check } from "lucide-react";
 
@@ -81,6 +82,9 @@ export default function SettingsPage() {
         </Section>
       </Card>
 
+      {/* Rest timer toggle */}
+      <RestTimerToggle />
+
       {/* Which muscles to track */}
       <TrackedMusclesEditor />
 
@@ -128,6 +132,39 @@ function Section({ icon, title, children }: { icon: React.ReactNode; title: stri
       </h2>
       {children}
     </div>
+  );
+}
+
+function RestTimerToggle() {
+  const { enabled, setEnabled } = useRestTimerEnabled();
+  return (
+    <Card className="p-5">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <h2 className="font-bold text-zinc-700 dark:text-zinc-300 text-sm flex items-center gap-2">
+            <Timer className="w-4 h-4" /> Rest timer
+          </h2>
+          <p className="text-xs text-zinc-500 mt-1">
+            Auto-start a countdown after completing a set.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setEnabled(!enabled)}
+          role="switch"
+          aria-checked={enabled}
+          className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full transition-colors ${
+            enabled ? "bg-brand-500" : "bg-zinc-300 dark:bg-zinc-700"
+          }`}
+        >
+          <span
+            className={`inline-block h-6 w-6 rounded-full bg-white shadow-sm transition-transform mt-0.5 ${
+              enabled ? "translate-x-[22px]" : "translate-x-0.5"
+            }`}
+          />
+        </button>
+      </div>
+    </Card>
   );
 }
 

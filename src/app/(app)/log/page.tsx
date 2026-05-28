@@ -26,6 +26,8 @@ import { SetRow } from "@/components/workout/SetRow";
 import { ExerciseAutocomplete } from "@/components/workout/ExerciseAutocomplete";
 import { PlateCalculator } from "@/components/workout/PlateCalculator";
 import { useTimer } from "@/providers/TimerProvider";
+import { useRestTimerEnabled } from "@/hooks/useRestTimerEnabled";
+import { RestTimer } from "@/components/workout/RestTimer";
 import { AIGenerateModal } from "@/components/workout/AIGenerateModal";
 
 interface Draft {
@@ -62,6 +64,7 @@ export default function LogPage() {
   const [aiOpen, setAiOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const timer = useTimer();
+  const { enabled: timerEnabled } = useRestTimerEnabled();
 
   // Handle ?repeat=workoutId pre-fill
   useEffect(() => {
@@ -192,6 +195,7 @@ export default function LogPage() {
       }
 
       clearDraft();
+      timer.cancel();
       toast.success("Workout saved");
       router.push("/dashboard");
     } catch (e) {
@@ -331,31 +335,45 @@ export default function LogPage() {
                           />
                         </div>
 
-                        <details className="mt-2">
-                          <summary className="text-xs text-zinc-500 hover:text-zinc-700 cursor-pointer flex items-center gap-1">
-                            <Settings2 className="w-3 h-3" /> Machine settings
+                        <details className="mt-3 group">
+                          <summary className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 cursor-pointer flex items-center gap-1.5 select-none list-none [&::-webkit-details-marker]:hidden">
+                            <Settings2 className="w-3 h-3" />
+                            <span>Machine settings</span>
+                            <ChevronDown className="w-3 h-3 transition-transform group-open:rotate-180" />
                           </summary>
-                          <div className="mt-2 flex gap-2">
-                            <input
-                              placeholder="Seat / pad"
-                              value={exercise.settings?.seat ?? ""}
-                              onChange={(e) =>
-                                updateExercise(exercise.id, {
-                                  settings: { ...exercise.settings, seat: e.target.value },
-                                })
-                              }
-                              className="flex-1 bg-zinc-50 dark:bg-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand-300 outline-none"
-                            />
-                            <input
-                              placeholder="Incline"
-                              value={exercise.settings?.incline ?? ""}
-                              onChange={(e) =>
-                                updateExercise(exercise.id, {
-                                  settings: { ...exercise.settings, incline: e.target.value },
-                                })
-                              }
-                              className="flex-1 bg-zinc-50 dark:bg-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand-300 outline-none"
-                            />
+                          <div className="mt-3 grid grid-cols-2 gap-2">
+                            <label className="flex flex-col gap-1 min-w-0">
+                              <span className="text-[10px] uppercase tracking-wider text-zinc-500 dark:text-zinc-500 font-bold">
+                                Seat / pad
+                              </span>
+                              <input
+                                value={exercise.settings?.seat ?? ""}
+                                onChange={(e) =>
+                                  updateExercise(exercise.id, {
+                                    settings: { ...exercise.settings, seat: e.target.value },
+                                  })
+                                }
+                                placeholder="e.g. 5"
+                                maxLength={20}
+                                className="w-full bg-zinc-50 dark:bg-zinc-800 rounded-lg px-3 py-2 text-sm font-semibold text-zinc-800 dark:text-zinc-200 focus:ring-2 focus:ring-brand-500 outline-none placeholder-zinc-400 dark:placeholder-zinc-600"
+                              />
+                            </label>
+                            <label className="flex flex-col gap-1 min-w-0">
+                              <span className="text-[10px] uppercase tracking-wider text-zinc-500 dark:text-zinc-500 font-bold">
+                                Incline / angle
+                              </span>
+                              <input
+                                value={exercise.settings?.incline ?? ""}
+                                onChange={(e) =>
+                                  updateExercise(exercise.id, {
+                                    settings: { ...exercise.settings, incline: e.target.value },
+                                  })
+                                }
+                                placeholder="e.g. 30°"
+                                maxLength={20}
+                                className="w-full bg-zinc-50 dark:bg-zinc-800 rounded-lg px-3 py-2 text-sm font-semibold text-zinc-800 dark:text-zinc-200 focus:ring-2 focus:ring-brand-500 outline-none placeholder-zinc-400 dark:placeholder-zinc-600"
+                              />
+                            </label>
                           </div>
                         </details>
 
@@ -383,7 +401,9 @@ export default function LogPage() {
                             canDelete={exercise.sets.length > 1}
                             onChange={(patch) => updateSet(exercise.id, set.id, patch)}
                             onDelete={() => removeSet(exercise.id, set.id)}
-                            onComplete={() => timer.start(exercise.restSec ?? 90)}
+                            onComplete={() => {
+                              if (timerEnabled) timer.start(exercise.restSec ?? 90);
+                            }}
                           />
                         ))}
                       </div>
@@ -469,6 +489,7 @@ export default function LogPage() {
           destructive
           onConfirm={() => {
             clearDraft();
+            timer.cancel();
             setDraft({ name: "Evening Lift", exercises: [blankExercise()], startedAt: Date.now() });
           }}
           trigger={(open) => (
@@ -486,6 +507,10 @@ export default function LogPage() {
         recent={workouts}
         onApply={({ name, exercises }) => setDraft({ ...draft, name, exercises, startedAt: Date.now() })}
       />
+
+      {/* Timer UI is page-scoped (only visible here). State lives globally in
+          TimerProvider so it keeps ticking when you navigate away. */}
+      <RestTimer />
     </div>
   );
 }

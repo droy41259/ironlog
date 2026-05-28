@@ -4,7 +4,6 @@ import { TopBar } from "@/components/layout/TopBar";
 import { BottomNav } from "@/components/layout/BottomNav";
 import { PWARegister } from "@/components/PWARegister";
 import { TimerProvider } from "@/providers/TimerProvider";
-import { RestTimer } from "@/components/workout/RestTimer";
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
@@ -14,7 +13,6 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           <TopBar />
           <main className="max-w-md mx-auto p-4 pb-32">{children}</main>
           <BottomNav />
-          <RestTimer />
           <PWARegister />
         </div>
       </TimerProvider>

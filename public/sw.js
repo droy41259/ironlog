@@ -2,7 +2,7 @@
    for page navigations and only falling back to cache when offline.
    Bump CACHE on releases to force-evict the old shell. */
 
-const CACHE = "ironlog-shell-v3";
+const CACHE = "ironlog-shell-v4";
 const STATIC = ["/manifest.json", "/icon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -17,8 +17,15 @@ self.addEventListener("install", (event) => {
       ),
     ),
   );
-  // Activate immediately on first install — no waiting for old tabs to close.
+  // Activate immediately on first install
   self.skipWaiting();
+});
+
+// Allow the page to tell us to skip waiting on subsequent updates
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener("activate", (event) => {
