@@ -10,6 +10,8 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  updateDoc,
+  writeBatch,
   Timestamp,
   type Unsubscribe,
 } from "firebase/firestore";
@@ -17,6 +19,7 @@ import { db } from "./client";
 import type { Workout, WorkoutTemplate, BodyMetric, MuscleGroup } from "@/types/workout";
 import type { CoachMessage } from "@/types/ai";
 import type { UserProfile } from "@/types/user";
+import type { Program, ProgramCursor } from "@/types/program";
 
 // ─── Workouts ────────────────────────────────────────────────────────
 function workoutsCol(uid: string) {
@@ -38,6 +41,7 @@ export function subscribeToWorkouts(uid: string, cb: (workouts: Workout[]) => vo
         totalVolume: Number(data["totalVolume"] ?? 0),
         durationSec: data["durationSec"] as number | undefined,
         notes: data["notes"] as string | undefined,
+        programRef: (data["programRef"] as Workout["programRef"]) ?? undefined,
       };
     });
     cb(rows);
@@ -51,6 +55,7 @@ export async function saveWorkout(uid: string, workout: Omit<Workout, "id" | "da
     totalVolume: workout.totalVolume,
     durationSec: workout.durationSec ?? null,
     notes: workout.notes ?? null,
+    programRef: workout.programRef ?? null,
     date: workout.date ? Timestamp.fromDate(workout.date) : serverTimestamp(),
   });
 }
@@ -223,4 +228,66 @@ export function subscribeToProfile(uid: string, cb: (p: Partial<UserProfile> | n
   return onSnapshot(profileDoc(uid), (snap) => {
     cb(snap.exists() ? (snap.data() as Partial<UserProfile>) : null);
   });
+}
+
+// ─── Programs / mesocycles ───────────────────────────────────────────
+export function programsCol(uid: string) {
+  return collection(db, "users", uid, "programs");
+}
+
+export function subscribeToPrograms(uid: string, cb: (p: Program[]) => void): Unsubscribe {
+  const q = query(programsCol(uid), orderBy("createdAt", "desc"));
+  return onSnapshot(q, (snap) =>
+    cb(
+      snap.docs.map((d) => {
+        const data = d.data() as Record<string, unknown>;
+        return {
+          id: d.id,
+          name: String(data["name"] ?? "Untitled program"),
+          description: data["description"] as string | undefined,
+          weeks: (data["weeks"] as Program["weeks"]) ?? [],
+          trainingMaxes: (data["trainingMaxes"] as Program["trainingMaxes"]) ?? {},
+          active: Boolean(data["active"]),
+          cursor: (data["cursor"] as ProgramCursor) ?? { week: 0, day: 0 },
+          createdAt: data["createdAt"] instanceof Timestamp ? (data["createdAt"] as Timestamp).toDate() : new Date(),
+        };
+      }),
+    ),
+  );
+}
+
+export async function saveProgram(
+  uid: string,
+  program: Omit<Program, "id" | "createdAt">,
+) {
+  return addDoc(programsCol(uid), {
+    name: program.name,
+    description: program.description ?? null,
+    weeks: program.weeks,
+    trainingMaxes: program.trainingMaxes ?? {},
+    active: program.active ?? false,
+    cursor: program.cursor ?? { week: 0, day: 0 },
+    createdAt: serverTimestamp(),
+  });
+}
+
+export async function updateProgram(uid: string, id: string, patch: Partial<Program>) {
+  return updateDoc(doc(programsCol(uid), id), patch as Record<string, unknown>);
+}
+
+export async function deleteProgram(uid: string, id: string) {
+  return deleteDoc(doc(programsCol(uid), id));
+}
+
+/** Make exactly one program active; all others are flipped inactive in a batch. */
+export async function setActiveProgram(uid: string, id: string, allIds: string[]) {
+  const batch = writeBatch(db);
+  for (const pid of allIds) {
+    batch.update(doc(programsCol(uid), pid), { active: pid === id });
+  }
+  return batch.commit();
+}
+
+export async function advanceProgramCursor(uid: string, id: string, cursor: ProgramCursor) {
+  return updateDoc(doc(programsCol(uid), id), { cursor });
 }

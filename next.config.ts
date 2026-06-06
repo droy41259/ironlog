@@ -25,12 +25,30 @@ const securityHeaders = [
   },
 ];
 
+// Set by `npm run build:native` (scripts/build-native.mjs). When true we emit a
+// fully static site into `out/` that gets bundled inside the Capacitor
+// Android/iOS shells. The normal `next build` (web/server deploy) is untouched.
+const isNative = process.env.BUILD_TARGET === "native";
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  async headers() {
-    return [{ source: "/(.*)", headers: securityHeaders }];
-  },
+  ...(isNative
+    ? {
+        output: "export",
+        // No Next.js image optimizer server exists inside the bundled app.
+        images: { unoptimized: true },
+        // Emit `route/index.html` per page so the in-app WebView resolves
+        // deep paths to a real file.
+        trailingSlash: true,
+      }
+    : {
+        // Security headers are a server feature and don't apply to the
+        // statically-exported native bundle, so only attach them for web.
+        async headers() {
+          return [{ source: "/(.*)", headers: securityHeaders }];
+        },
+      }),
 };
 
 export default nextConfig;

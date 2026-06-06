@@ -2,6 +2,11 @@
 
 import { auth } from "@/lib/firebase/client";
 
+// Native (Capacitor) builds bundle a static site with no server of their own,
+// so the AI proxy lives on a hosted origin. Set NEXT_PUBLIC_API_BASE_URL for
+// those builds; web builds leave it empty and call the same origin.
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
+
 /**
  * Client-side wrapper for /api/gemini. Always attaches a fresh Firebase ID token
  * so the server can verify the caller before spending money on a model call.
@@ -16,7 +21,7 @@ export async function callGemini<T = unknown>(
 
   const idToken = await user.getIdToken();
 
-  const res = await fetch("/api/gemini", {
+  const res = await fetch(`${API_BASE}/api/gemini`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

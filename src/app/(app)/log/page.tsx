@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Plus, Trash2, Save, Calendar, Settings2, TrendingUp, MessageSquareQuote,
@@ -11,14 +11,17 @@ import { useWorkouts } from "@/hooks/useWorkouts";
 import { useDraft } from "@/hooks/useDraft";
 import { useToast } from "@/providers/ToastProvider";
 import { useUnits } from "@/providers/UnitsProvider";
-import { saveWorkout } from "@/lib/firebase/repository";
+import { saveWorkout, advanceProgramCursor } from "@/lib/firebase/repository";
 import { useCustomExercises } from "@/hooks/useCustomExercises";
+import { usePrograms } from "@/hooks/usePrograms";
+import { resolveDay, nextCursor, clampCursor } from "@/lib/programs/resolve";
 import { workoutVolume } from "@/lib/analytics/volume";
 import { lastSessionFor } from "@/lib/analytics/personal-records";
 import { findExercise } from "@/lib/data/exercises";
 import { MUSCLE_LABELS } from "@/lib/analytics/muscle-groups";
 import { uid } from "@/lib/utils";
 import type { Exercise, MuscleGroup, WorkoutSet } from "@/types/workout";
+import type { ProgramRef } from "@/types/program";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Confirm } from "@/components/ui/Confirm";
@@ -34,6 +37,8 @@ interface Draft {
   name: string;
   exercises: Exercise[];
   startedAt: number;
+  /** Set when this session was started from a program day. */
+  programRef?: ProgramRef;
 }
 
 function blankExercise(name = ""): Exercise {
@@ -46,7 +51,17 @@ function blankExercise(name = ""): Exercise {
   };
 }
 
+// useSearchParams() must sit under a Suspense boundary for the static export
+// (and for streaming SSR on web). Keep the page logic in an inner component.
 export default function LogPage() {
+  return (
+    <Suspense fallback={null}>
+      <LogPageInner />
+    </Suspense>
+  );
+}
+
+function LogPageInner() {
   const { user } = useAuth();
   const router = useRouter();
   const params = useSearchParams();
@@ -54,6 +69,7 @@ export default function LogPage() {
   const { units: _units } = useUnits();
   const { workouts } = useWorkouts();
   const { exercises: customExercises, upsert: upsertCustomExercise } = useCustomExercises();
+  const { programs } = usePrograms();
 
   const [draft, setDraft, clearDraft] = useDraft<Draft>(user?.uid, "draft", {
     name: "Evening Lift",
@@ -84,6 +100,31 @@ export default function LogPage() {
     router.replace("/log");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params, workouts.length]);
+
+  // Handle ?program=programId pre-fill — resolves the program's current cursor day.
+  useEffect(() => {
+    const programId = params.get("program");
+    if (!programId) return;
+    const program = programs.find((p) => p.id === programId);
+    if (!program) return;
+    const resolved = resolveDay(program);
+    if (!resolved) return;
+    const c = clampCursor(program, program.cursor);
+    setDraft({
+      name: resolved.name,
+      startedAt: Date.now(),
+      exercises: resolved.exercises,
+      programRef: {
+        id: program.id,
+        programName: program.name,
+        week: c.week,
+        day: c.day,
+        dayLabel: program.weeks[c.week]?.days[c.day]?.label ?? "Day",
+      },
+    });
+    router.replace("/log");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params, programs.length]);
 
   const groups = useMemo(() => groupBySupersets(draft.exercises), [draft.exercises]);
 
@@ -180,7 +221,24 @@ export default function LogPage() {
         exercises: valid,
         totalVolume: workoutVolume({ exercises: valid }),
         durationSec: Math.round((Date.now() - draft.startedAt) / 1000),
+        programRef: draft.programRef,
       });
+
+      // If this session came from a program, advance its cursor to the next day.
+      if (draft.programRef) {
+        const program = programs.find((p) => p.id === draft.programRef!.id);
+        if (program) {
+          try {
+            await advanceProgramCursor(
+              user.uid,
+              program.id,
+              nextCursor(program, { week: draft.programRef.week, day: draft.programRef.day }),
+            );
+          } catch {
+            // Non-fatal: the workout is already saved.
+          }
+        }
+      }
 
       // Save any custom exercises (with muscle tags) to the user's local library
       // so they appear in autocomplete next time. Local-only — no network, no rules.

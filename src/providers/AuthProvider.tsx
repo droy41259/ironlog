@@ -15,7 +15,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ user: null, loading: true });
 
   useEffect(() => {
-    return onAuthStateChanged(auth, (u) => setState({ user: u, loading: false }));
+    // The error callback guards against the auth listener never resolving
+    // (which would otherwise hang the app on a blank loading screen).
+    return onAuthStateChanged(
+      auth,
+      (u) => setState({ user: u, loading: false }),
+      () => setState({ user: null, loading: false }),
+    );
   }, []);
 
   return <AuthCtx.Provider value={state}>{children}</AuthCtx.Provider>;

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ironlog-static",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "5056", "--directory", "out"],
+      "port": 5056
+    }
+  ]
+}

@@ -27,6 +27,10 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
+  // Required so iOS exposes env(safe-area-inset-*) to CSS — the TopBar and
+  // BottomNav already pad with those insets, but they read 0 without this, so
+  // content would render under the status bar / Dynamic Island and home bar.
+  viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#ffffff" },
     { media: "(prefers-color-scheme: dark)", color: "#09090b" },

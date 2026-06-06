@@ -9,6 +9,9 @@ out/
 build/
 dist/
 
+# capacitor — transient stash used by scripts/build-native.mjs
+.api-stash/
+
 # env — never commit
 .env
 .env.*

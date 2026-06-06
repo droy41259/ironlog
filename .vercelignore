@@ -1,0 +1,7 @@
+# Native app projects and build artifacts — not part of the web deploy.
+android/
+ios/
+out/
+assets/
+.api-stash/
+*.apk

@@ -38,6 +38,11 @@ service cloud.firestore {
       allow read, write: if isOwner(uid);
     }
 
+    // ─── Programs / mesocycles ───────────────────────────────────
+    match /users/{uid}/programs/{doc} {
+      allow read, write: if isOwner(uid);
+    }
+
     // ─── Custom exercise library (user-created exercises) ────────
     match /users/{uid}/exercises/{doc} {
       allow read, write: if isOwner(uid);

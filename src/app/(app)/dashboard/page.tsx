@@ -12,6 +12,7 @@ import { Hero } from "@/components/dashboard/Hero";
 import { MuscleBalance } from "@/components/dashboard/MuscleBalance";
 import { StatStrip } from "@/components/dashboard/StatStrip";
 import { TemplatesFromHistory } from "@/components/dashboard/TemplatesFromHistory";
+import { TodayProgram } from "@/components/dashboard/TodayProgram";
 import { VolumeChart } from "@/components/dashboard/VolumeChart";
 import { PRCards } from "@/components/dashboard/PRCards";
 import { CoachInsight } from "@/components/dashboard/CoachInsight";
@@ -56,6 +57,8 @@ export default function DashboardPage() {
   return (
     <div className="space-y-5 animate-fade-in">
       <Hero name={name} workouts={workouts} />
+
+      <TodayProgram />
 
       <StatStrip workouts={workouts} streak={streak} />
 

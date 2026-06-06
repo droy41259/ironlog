@@ -60,6 +60,8 @@ export interface Workout {
   /** Total duration in seconds (optional) */
   durationSec?: number;
   notes?: string;
+  /** Set when this session was started from a program day (mesocycle tracking). */
+  programRef?: import("./program").ProgramRef;
 }
 
 export interface WorkoutTemplate {
