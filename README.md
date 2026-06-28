@@ -25,7 +25,6 @@ A modern, secure rewrite of IronLog. Built with Next.js 15 (App Router), TypeScr
 - Workout templates / routines
 - Body metrics tracking (weight log)
 - Streaks + weekly goal badge
-- Voice logging ("80 kilos 8 reps")
 - AI Coach with persisted chat history across sessions
 - PWA — installable, basic offline shell
 - CSV + JSON export
