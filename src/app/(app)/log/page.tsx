@@ -14,6 +14,7 @@ import { useUnits } from "@/providers/UnitsProvider";
 import { saveWorkout, advanceProgramCursor } from "@/lib/firebase/repository";
 import { useCustomExercises } from "@/hooks/useCustomExercises";
 import { usePrograms } from "@/hooks/usePrograms";
+import { useLatestBodyweight } from "@/hooks/useLatestBodyweight";
 import { resolveDay, nextCursor, clampCursor } from "@/lib/programs/resolve";
 import { workoutVolume } from "@/lib/analytics/volume";
 import { lastSessionFor } from "@/lib/analytics/personal-records";
@@ -70,6 +71,7 @@ function LogPageInner() {
   const { workouts } = useWorkouts();
   const { exercises: customExercises, upsert: upsertCustomExercise } = useCustomExercises();
   const { programs } = usePrograms();
+  const bodyweightKg = useLatestBodyweight();
 
   const [draft, setDraft, clearDraft] = useDraft<Draft>(user?.uid, "draft", {
     name: "Evening Lift",
@@ -219,7 +221,7 @@ function LogPageInner() {
       await saveWorkout(user.uid, {
         name: draft.name.trim() || "Workout",
         exercises: valid,
-        totalVolume: workoutVolume({ exercises: valid }),
+        totalVolume: workoutVolume({ exercises: valid }, bodyweightKg),
         durationSec: Math.round((Date.now() - draft.startedAt) / 1000),
         programRef: draft.programRef,
       });

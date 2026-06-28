@@ -7,6 +7,8 @@ import { useAuth } from "@/providers/AuthProvider";
 import { useWorkouts } from "@/hooks/useWorkouts";
 import { currentStreakWeeks } from "@/lib/analytics/streak";
 import { computePRs } from "@/lib/analytics/personal-records";
+import { workoutVolume } from "@/lib/analytics/volume";
+import { useLatestBodyweight } from "@/hooks/useLatestBodyweight";
 
 import { Hero } from "@/components/dashboard/Hero";
 import { MuscleBalance } from "@/components/dashboard/MuscleBalance";
@@ -21,6 +23,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 export default function DashboardPage() {
   const { user } = useAuth();
   const { workouts, loading } = useWorkouts();
+  const bodyweightKg = useLatestBodyweight();
 
   const name = (user?.displayName || user?.email?.split("@")[0] || "Athlete").replace(/^./, (c) => c.toUpperCase());
 
@@ -33,11 +36,11 @@ export default function DashboardPage() {
         .sort((a, b) => a.date.getTime() - b.date.getTime())
         .slice(-10)
         .map((w) => ({
-          kg: w.totalVolume,
+          kg: workoutVolume(w, bodyweightKg),
           label: w.date.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
           date: w.date,
         })),
-    [workouts],
+    [workouts, bodyweightKg],
   );
 
   if (loading) {

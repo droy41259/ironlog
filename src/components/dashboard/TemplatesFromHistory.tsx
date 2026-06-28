@@ -6,6 +6,8 @@ import { ArrowRight, Layers, Clock, Play } from "lucide-react";
 import type { Workout } from "@/types/workout";
 import { useUnits } from "@/providers/UnitsProvider";
 import { formatWeight } from "@/lib/units/converter";
+import { workoutVolume } from "@/lib/analytics/volume";
+import { useLatestBodyweight } from "@/hooks/useLatestBodyweight";
 import { daysAgo } from "@/lib/utils";
 
 /**
@@ -15,6 +17,7 @@ import { daysAgo } from "@/lib/utils";
  */
 export function TemplatesFromHistory({ workouts }: { workouts: Workout[] }) {
   const { units } = useUnits();
+  const bodyweightKg = useLatestBodyweight();
 
   const templates = useMemo(() => {
     const groups = new Map<string, { count: number; latest: Workout }>();
@@ -80,7 +83,7 @@ export function TemplatesFromHistory({ workouts }: { workouts: Workout[] }) {
                   <span>{t.latest.exercises.length} ex</span>
                   <span className="text-zinc-300 dark:text-zinc-700">·</span>
                   <span style={{ fontVariantNumeric: "tabular-nums" }}>
-                    {formatWeight(t.latest.totalVolume, units, 0)}
+                    {formatWeight(workoutVolume(t.latest, bodyweightKg), units, 0)}
                   </span>
                 </div>
               </div>

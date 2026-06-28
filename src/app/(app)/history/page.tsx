@@ -11,6 +11,8 @@ import { useWorkouts } from "@/hooks/useWorkouts";
 import { useToast } from "@/providers/ToastProvider";
 import { useUnits } from "@/providers/UnitsProvider";
 import { deleteWorkout } from "@/lib/firebase/repository";
+import { workoutVolume } from "@/lib/analytics/volume";
+import { useLatestBodyweight } from "@/hooks/useLatestBodyweight";
 import { callGemini } from "@/lib/ai/gemini-client";
 import { HISTORY_ANALYZER_SYSTEM_PROMPT } from "@/lib/ai/system-prompts";
 import { Card } from "@/components/ui/Card";
@@ -25,15 +27,16 @@ export default function HistoryPage() {
   const { workouts, loading } = useWorkouts();
   const { units } = useUnits();
   const toast = useToast();
+  const bodyweightKg = useLatestBodyweight();
   const [expanded, setExpanded] = useState<string | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
 
   const stats = useMemo(() => {
     const totalSessions = workouts.length;
-    const totalVolume = workouts.reduce((a, w) => a + w.totalVolume, 0);
+    const totalVolume = workouts.reduce((a, w) => a + workoutVolume(w, bodyweightKg), 0);
     return { totalSessions, totalVolume };
-  }, [workouts]);
+  }, [workouts, bodyweightKg]);
 
   const handleDelete = async (id: string) => {
     if (!user) return;
@@ -178,7 +181,7 @@ export default function HistoryPage() {
                     <span className="text-zinc-300 dark:text-zinc-700">·</span>
                     <span>{w.exercises.length} ex</span>
                     <span className="text-zinc-300 dark:text-zinc-700">·</span>
-                    <span style={{ fontVariantNumeric: "tabular-nums" }}>{formatWeight(w.totalVolume, units, 0)}</span>
+                    <span style={{ fontVariantNumeric: "tabular-nums" }}>{formatWeight(workoutVolume(w, bodyweightKg), units, 0)}</span>
                   </div>
                 </button>
                 <div className="flex divide-x divide-zinc-100 dark:divide-zinc-800 border-t border-zinc-100 dark:border-zinc-800">

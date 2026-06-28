@@ -111,7 +111,9 @@ export function SetRow({ index, set, suggestion, canDelete, onChange, onDelete, 
           type="button"
           onClick={() => {
             onChange({ completed: !set.completed });
-            if (!set.completed && set.kg > 0 && set.reps > 0) onComplete();
+            // Fire the rest timer on completion. Only reps are required — bodyweight
+            // moves (push-ups, pull-ups, dips) legitimately have kg === 0.
+            if (!set.completed && set.reps > 0) onComplete();
           }}
           aria-label={set.completed ? "Mark set incomplete" : "Mark set complete"}
           className={`p-2 min-w-[44px] min-h-[44px] rounded-full transition-colors flex items-center justify-center ${

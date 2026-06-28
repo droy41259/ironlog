@@ -8,7 +8,7 @@ import { useToast } from "@/providers/ToastProvider";
 import { fromKg, toKg } from "@/lib/units/converter";
 import { estimate1RM } from "@/lib/analytics/onerm";
 import { workoutSetCount, workoutVolume } from "@/lib/analytics/volume";
-import { startOfWeek, daysAgo } from "@/lib/utils";
+import { useLatestBodyweight } from "@/hooks/useLatestBodyweight";
 import { addBodyMetric, subscribeToBodyMetrics } from "@/lib/firebase/repository";
 import type { BodyMetric } from "@/types/workout";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -60,6 +60,7 @@ function ProgressionChart({ data, color = "#3b82f6" }: { data: { date: Date; v: 
 export default function StatsPage() {
   const { workouts, loading } = useWorkouts();
   const { units } = useUnits();
+  const bodyweightKg = useLatestBodyweight();
 
   // Exercises that show up most often, for the picker
   const exercises = useMemo(() => {
@@ -92,33 +93,33 @@ export default function StatsPage() {
     return rows;
   }, [workouts, selected, units]);
 
-  // Last 12 weeks of volume
-  const weekly = useMemo(() => {
-    const buckets: { label: string; kg: number; date: Date }[] = [];
-    const cursor = startOfWeek();
-    for (let i = 11; i >= 0; i--) {
-      const start = new Date(cursor);
-      start.setDate(start.getDate() - i * 7);
-      const end = new Date(start);
-      end.setDate(end.getDate() + 7);
-      const vol = workouts
-        .filter((w) => w.date >= start && w.date < end)
-        .reduce((a, w) => a + w.totalVolume, 0);
-      buckets.push({
-        label: start.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-        kg: vol,
-        date: start,
-      });
+  // Training emphasis: every completed set bucketed by rep range. This uses the
+  // whole history (no time window), so it stays useful no matter when you trained.
+  const repRanges = useMemo(() => {
+    let strength = 0; // 1–5 reps
+    let hypertrophy = 0; // 6–12 reps
+    let endurance = 0; // 13+ reps
+    for (const w of workouts) {
+      for (const ex of w.exercises ?? []) {
+        for (const s of ex.sets ?? []) {
+          if (!s.completed) continue;
+          const reps = Number.isFinite(s.reps) ? s.reps : 0;
+          if (reps <= 0) continue;
+          if (reps <= 5) strength++;
+          else if (reps <= 12) hypertrophy++;
+          else endurance++;
+        }
+      }
     }
-    return buckets;
+    return { strength, hypertrophy, endurance, total: strength + hypertrophy + endurance };
   }, [workouts]);
 
   const totals = useMemo(() => {
     const sessions = workouts.length;
     const sets = workouts.reduce((a, w) => a + workoutSetCount(w), 0);
-    const volume = workouts.reduce((a, w) => a + workoutVolume(w), 0);
+    const volume = workouts.reduce((a, w) => a + workoutVolume(w, bodyweightKg), 0);
     return { sessions, sets, volume };
-  }, [workouts]);
+  }, [workouts, bodyweightKg]);
 
   if (loading) {
     return (
@@ -129,9 +130,6 @@ export default function StatsPage() {
       </div>
     );
   }
-
-  const weeklyMax = Math.max(...weekly.map((w) => w.kg), 1);
-  const hasWorkouts = workouts.length > 0;
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -199,41 +197,8 @@ export default function StatsPage() {
         <ProgressionChart data={progression} />
       </section>
 
-      {/* 12-week volume */}
-      <section className="rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800/60 p-5">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h3 className="font-bold text-zinc-900 dark:text-white text-sm">Weekly volume</h3>
-            <p className="text-xs text-zinc-500">Last 12 weeks</p>
-          </div>
-        </div>
-        {hasWorkouts ? (
-          <div className="flex items-end justify-between gap-1 h-32">
-            {weekly.map((w, i) => {
-              const v = fromKg(w.kg, units);
-              const h = (w.kg / weeklyMax) * 100;
-              return (
-                <div key={i} className="flex-1 flex flex-col items-center gap-1 group" title={`${w.label}: ${Math.round(v)} ${units}`}>
-                  <div className="w-full bg-zinc-100 dark:bg-zinc-800 rounded-t-md relative overflow-hidden" style={{ height: "100%" }}>
-                    <div
-                      className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-brand-700 to-brand-500 rounded-t-md transition-all duration-500 group-hover:from-brand-600 group-hover:to-brand-400"
-                      style={{ height: `${Math.max(2, h)}%` }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="h-32 flex items-center justify-center text-xs text-zinc-500 italic">
-            Log a workout to start tracking weekly volume.
-          </div>
-        )}
-        <div className="flex justify-between text-[10px] text-zinc-400 dark:text-zinc-600 mt-2">
-          <span>{weekly[0]?.label}</span>
-          <span>{weekly[weekly.length - 1]?.label}</span>
-        </div>
-      </section>
+      {/* Training emphasis — rep-range distribution */}
+      <RepRangeSection ranges={repRanges} />
 
       {/* Frequency calendar */}
       <MonthCalendar workouts={workouts} />
@@ -381,6 +346,79 @@ function BodyweightChart({ data }: { data: { date: Date; v: number }[] }) {
         <span>{data[data.length - 1]?.date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
       </div>
     </div>
+  );
+}
+
+function RepRangeSection({
+  ranges,
+}: {
+  ranges: { strength: number; hypertrophy: number; endurance: number; total: number };
+}) {
+  const rows = [
+    { key: "strength", label: "Strength", hint: "1–5 reps", color: "#ef4444", count: ranges.strength },
+    { key: "hypertrophy", label: "Hypertrophy", hint: "6–12 reps", color: "#3b82f6", count: ranges.hypertrophy },
+    { key: "endurance", label: "Endurance", hint: "13+ reps", color: "#10b981", count: ranges.endurance },
+  ];
+  const top = rows.reduce((a, b) => (b.count > a.count ? b : a), rows[0]!);
+
+  return (
+    <section className="rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800/60 p-5">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="font-bold text-zinc-900 dark:text-white text-sm">Training emphasis</h3>
+          <p className="text-xs text-zinc-500">Completed sets by rep range</p>
+        </div>
+        {ranges.total > 0 && (
+          <div className="text-right">
+            <div className="text-xl font-bold text-zinc-900 dark:text-white leading-none" style={{ fontVariantNumeric: "tabular-nums" }}>
+              {ranges.total}
+            </div>
+            <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold mt-0.5">Sets</div>
+          </div>
+        )}
+      </div>
+
+      {ranges.total === 0 ? (
+        <p className="text-xs text-zinc-500 italic text-center py-8">
+          Complete some sets to see your rep-range split.
+        </p>
+      ) : (
+        <>
+          <ul className="space-y-3">
+            {rows.map((r) => {
+              const pct = Math.round((r.count / ranges.total) * 100);
+              return (
+                <li key={r.key} className="flex items-center gap-3">
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: r.color }} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-baseline mb-1">
+                      <span className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+                        {r.label}{" "}
+                        <span className="text-xs font-normal text-zinc-400 dark:text-zinc-500">{r.hint}</span>
+                      </span>
+                      <span className="text-xs" style={{ fontVariantNumeric: "tabular-nums" }}>
+                        <span className="text-zinc-700 dark:text-zinc-300 font-semibold">{pct}%</span>
+                        <span className="text-zinc-400 dark:text-zinc-600"> · {r.count}</span>
+                      </span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-700"
+                        style={{ width: `${pct}%`, backgroundColor: r.color }}
+                      />
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          <p className="text-xs text-zinc-500 mt-4">
+            Most of your work is in the{" "}
+            <span className="font-semibold text-zinc-700 dark:text-zinc-300">{top.label.toLowerCase()}</span> range.
+          </p>
+        </>
+      )}
+    </section>
   );
 }
 
